@@ -5,10 +5,12 @@ import hashlib
 from pathlib import Path
 from typing import Any, cast
 
+import pytest
+
 from relay.config import DeviceIdentity, SettingsStore
 from relay.discovery import DiscoveredDevice, DiscoveryManager
 from relay.models import DeviceMessage, IncomingManifestRequest, TransferManifestItem
-from relay.transfers import TransferManager
+from relay.transfers import TransferError, TransferManager
 
 
 class EmptyDiscovery:
@@ -22,6 +24,11 @@ class EmptyDiscovery:
 async def stream_bytes(value: bytes) -> Any:
     for offset in range(0, len(value), 4):
         yield value[offset : offset + 4]
+
+
+async def interrupted_stream(value: bytes) -> Any:
+    yield value
+    raise OSError("Connection interrupted")
 
 
 def test_staging_and_incoming_file_are_verified(tmp_path: Path) -> None:
@@ -88,3 +95,119 @@ def test_chunked_upload_retries_a_completed_chunk(tmp_path: Path) -> None:
     assert final["complete"] is True
     assert final["item"]["size"] == len(content)
     assert manager.list_staged()[0].public_dict() == final["item"]
+
+
+def test_chunked_upload_recovers_after_interrupted_stream(tmp_path: Path) -> None:
+    manager = TransferManager(
+        tmp_path / "data",
+        SettingsStore(tmp_path / "data"),
+        DeviceIdentity(id="local", name="Local PC", fingerprint="A" * 64),
+        cast(DiscoveryManager, EmptyDiscovery()),
+    )
+    content = b"first chunk then second chunk"
+    upload_id = "upload-interrupted"
+
+    with pytest.raises(OSError, match="Connection interrupted"):
+        asyncio.run(
+            manager.stage_chunk(
+                upload_id, "file.bin", len(content), 0, False, interrupted_stream(content[:11])
+            )
+        )
+    first = asyncio.run(
+        manager.stage_chunk(
+            upload_id, "file.bin", len(content), 0, False, stream_bytes(content[:11])
+        )
+    )
+    final = asyncio.run(
+        manager.stage_chunk(
+            upload_id, "file.bin", len(content), 11, True, stream_bytes(content[11:])
+        )
+    )
+
+    assert first["received"] == 11
+    assert final["item"]["sha256"] == hashlib.sha256(content).hexdigest()
+
+
+def test_incoming_chunk_retry_and_interruption_keep_integrity(tmp_path: Path) -> None:
+    manager = TransferManager(
+        tmp_path / "data",
+        SettingsStore(tmp_path / "data"),
+        DeviceIdentity(id="local", name="Local PC", fingerprint="A" * 64),
+        cast(DiscoveryManager, EmptyDiscovery()),
+    )
+    content = b"verified incoming file"
+    item_id = "file-1"
+    manifest = IncomingManifestRequest(
+        batch_name="batch",
+        source=DeviceMessage(id="remote", name="Remote PC", fingerprint="B" * 64),
+        items=[
+            TransferManifestItem(
+                id=item_id,
+                relative_path="file.bin",
+                size=len(content),
+                sha256=hashlib.sha256(content).hexdigest(),
+            )
+        ],
+    )
+    transfer = manager.create_incoming(manifest)
+
+    first = asyncio.run(
+        manager.receive_chunk(
+            transfer.transfer_id, item_id, 0, len(content), False, stream_bytes(content[:8])
+        )
+    )
+    duplicate = asyncio.run(
+        manager.receive_chunk(
+            transfer.transfer_id, item_id, 0, len(content), False, stream_bytes(content[:8])
+        )
+    )
+    with pytest.raises(OSError, match="Connection interrupted"):
+        asyncio.run(
+            manager.receive_chunk(
+                transfer.transfer_id,
+                item_id,
+                8,
+                len(content),
+                False,
+                interrupted_stream(content[8:13]),
+            )
+        )
+    final = asyncio.run(
+        manager.receive_chunk(
+            transfer.transfer_id, item_id, 8, len(content), True, stream_bytes(content[8:])
+        )
+    )
+
+    assert first["received_bytes"] == duplicate["received_bytes"] == 8
+    assert final["complete"] is True
+    status = manager.incoming_status(transfer.transfer_id)
+    assert (status.destination / "file.bin").read_bytes() == content
+
+
+def test_incoming_chunk_rejects_invalid_digest(tmp_path: Path) -> None:
+    manager = TransferManager(
+        tmp_path / "data",
+        SettingsStore(tmp_path / "data"),
+        DeviceIdentity(id="local", name="Local PC", fingerprint="A" * 64),
+        cast(DiscoveryManager, EmptyDiscovery()),
+    )
+    manifest = IncomingManifestRequest(
+        batch_name="batch",
+        source=DeviceMessage(id="remote", name="Remote PC", fingerprint="B" * 64),
+        items=[
+            TransferManifestItem(
+                id="file-1",
+                relative_path="file.bin",
+                size=4,
+                sha256=hashlib.sha256(b"good").hexdigest(),
+            )
+        ],
+    )
+    transfer = manager.create_incoming(manifest)
+
+    with pytest.raises(TransferError, match="failed its integrity check"):
+        asyncio.run(
+            manager.receive_chunk(transfer.transfer_id, "file-1", 0, 4, True, stream_bytes(b"evil"))
+        )
+
+    assert not (Path(transfer.destination) / "file.bin").exists()
