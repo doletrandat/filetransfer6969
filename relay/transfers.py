@@ -10,7 +10,7 @@ import uuid
 from collections.abc import AsyncIterable
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
-from typing import Any
+from typing import Any, Protocol
 from urllib.parse import urlparse
 
 import httpx
@@ -41,6 +41,14 @@ class TransferError(RuntimeError):
 
 class UnsafePathError(TransferError):
     pass
+
+
+class Digest(Protocol):
+    def update(self, data: bytes) -> None: ...
+
+    def hexdigest(self) -> str: ...
+
+    def copy(self) -> Digest: ...
 
 
 def sanitize_relative_path(value: str) -> Path:
@@ -111,6 +119,7 @@ class ChunkedUpload:
     path: Path
     created_at: float
     item: StagedItem | None = None
+    digest: Digest = field(default_factory=hashlib.sha256, repr=False)
 
 
 @dataclass(frozen=True, slots=True)
@@ -181,6 +190,7 @@ class IncomingItem:
     target: Path
     completed: bool = False
     received_bytes: int = 0
+    digest: Digest = field(default_factory=hashlib.sha256, repr=False)
 
 
 @dataclass(slots=True)
@@ -332,6 +342,7 @@ class TransferManager:
                 raise TransferError("The retried upload chunk did not match the original data.")
             new_size = current_size
         else:
+            previous_digest = upload.digest.copy()
             try:
                 with upload.path.open("ab") as output:
                     async for chunk in stream:
@@ -343,11 +354,13 @@ class TransferManager:
                                 "The upload contains more data than the selected file."
                             )
                         output.write(chunk)
+                        upload.digest.update(chunk)
                         upload.size = new_size
             except Exception:
                 with upload.path.open("r+b") as output:
                     output.truncate(offset)
                 upload.size = offset
+                upload.digest = previous_digest
                 raise
             new_size = upload.size
         if new_size > total_size:
@@ -363,7 +376,7 @@ class TransferManager:
             id=item_id,
             relative_path=upload.relative_path,
             size=upload.size,
-            sha256=_sha256(stored_path),
+            sha256=upload.digest.hexdigest(),
             staged_at=time.time(),
             path=stored_path,
         )
@@ -748,6 +761,7 @@ class TransferManager:
                 raise TransferError("The retried transfer chunk did not match the original data.")
             new_size = item.received_bytes
         else:
+            previous_digest = item.digest.copy()
             try:
                 with part_path.open("ab") as output:
                     async for chunk in stream:
@@ -757,17 +771,19 @@ class TransferManager:
                         if new_size > item.size or new_size > MAX_FILE_SIZE:
                             raise TransferError(f"{item.relative_path} is larger than announced.")
                         output.write(chunk)
+                        item.digest.update(chunk)
                         item.received_bytes = new_size
                         self._record_incoming_progress(transfer, len(chunk))
             except Exception:
                 with part_path.open("r+b") as output:
                     output.truncate(offset)
                 item.received_bytes = offset
+                item.digest = previous_digest
                 raise
             new_size = item.received_bytes
         if not (final or new_size == item.size):
             return {"received_bytes": new_size, "complete": False}
-        if new_size != item.size or _sha256(part_path) != item.sha256:
+        if new_size != item.size or item.digest.hexdigest() != item.sha256:
             raise TransferError(f"{item.relative_path} failed its integrity check.")
         os.replace(part_path, item.target)
         item.completed = True
