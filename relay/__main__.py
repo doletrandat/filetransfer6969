@@ -50,6 +50,7 @@ def main() -> None:
     port = available_port(args.port)
     app = build_app(data_dir, port)
     context = app.state.context
+    context.phone.import_existing(context.settings.load().destination)
     context.start()
     if not args.no_browser:
         timer = threading.Timer(

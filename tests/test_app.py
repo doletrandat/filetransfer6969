@@ -31,7 +31,9 @@ def test_local_interface_reports_device_status(tmp_path: Path) -> None:
         state = client.get("/api/v1/state")
 
     assert state.status_code == 200
-    assert set(state.json()) == {"status", "devices", "peers", "staged", "outgoing", "incoming"}
+    assert set(state.json()) == {
+        "status", "devices", "peers", "staged", "outgoing", "incoming", "phone_uploads"
+    }
 
 
 def test_local_control_is_private_to_the_device(tmp_path: Path) -> None:

@@ -10,8 +10,8 @@ from typing import Annotated, Any
 from urllib.parse import quote
 
 import qrcode
-from fastapi import BackgroundTasks, Depends, FastAPI, Header, HTTPException, Query, Request
-from fastapi.responses import HTMLResponse
+from fastapi import BackgroundTasks, Depends, FastAPI, Form, Header, HTTPException, Query, Request
+from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, Field
@@ -24,6 +24,7 @@ from relay.config import SettingsStore, get_local_addresses, load_or_create_iden
 from relay.discovery import DiscoveryManager
 from relay.models import IncomingManifestRequest
 from relay.network import PeerConnectionError
+from relay.phone import PHONE_COOKIE_NAME, PHONE_SESSION_TTL_SECONDS, PhoneAccess, PhoneSession
 from relay.security import AuthorizedPeer, PairingError, PairingRegistry, SessionRegistry
 from relay.transfers import TransferError, TransferManager
 
@@ -58,6 +59,7 @@ class AppContext:
         )
         self.pairing = PairingRegistry()
         self.sessions = SessionRegistry()
+        self.phone = PhoneAccess(data_dir)
         self.discovery = DiscoveryManager(
             device_id=self.identity.id,
             device_name=self.identity.name,
@@ -98,12 +100,25 @@ def create_app(context: AppContext) -> FastAPI:
             raise HTTPException(status_code=401, detail="This pairing has expired. Pair again.")
         return peer
 
+    def require_phone(request: Request) -> PhoneSession:
+        session = context.phone.get_session(request.cookies.get(PHONE_COOKIE_NAME))
+        if session is None:
+            raise HTTPException(status_code=401, detail="Open a new phone link on the computer.")
+        return session
+
     @app.middleware("http")
     async def security_headers(request: Request, call_next: RequestResponseEndpoint) -> Response:
         path = request.url.path
         local_route = path == "/" or (
             path.startswith("/api/v1/") and not path.startswith("/api/v1/remote/")
         )
+        phone_route = path == "/phone" or path.startswith("/phone/")
+        if phone_route and (
+            request.url.scheme != "https"
+            or request.url.hostname not in context.addresses
+            or request.url.hostname == "127.0.0.1"
+        ):
+            return Response(status_code=403)
         if local_route:
             client_host = request.client.host if request.client else ""
             try:
@@ -124,7 +139,7 @@ def create_app(context: AppContext) -> FastAPI:
         response.headers["Referrer-Policy"] = "no-referrer"
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["X-Frame-Options"] = "DENY"
-        if local_route:
+        if local_route or phone_route:
             response.headers["Cache-Control"] = "no-store"
         return response
 
@@ -133,6 +148,112 @@ def create_app(context: AppContext) -> FastAPI:
         return templates.TemplateResponse(
             request=request, name="index.html", context={"control_token": context.control_token}
         )
+
+    @app.post("/api/v1/phone/invite")
+    def create_phone_invitation() -> dict[str, Any]:
+        if context.advertised_address == "127.0.0.1":
+            raise HTTPException(status_code=503, detail="No local network address is available.")
+        token, expires_at = context.phone.create_invitation()
+        url = f"https://{context.advertised_address}:{context.port}/phone?invite={quote(token)}"
+        image = qrcode.make(url, image_factory=PilImage)
+        output = io.BytesIO()
+        image.save(output, format="PNG")
+        return {
+            "url": url,
+            "expires_at": expires_at,
+            "qr_data_url": (
+                "data:image/png;base64," + base64.b64encode(output.getvalue()).decode("ascii")
+            ),
+        }
+
+    @app.post("/api/v1/phone/revoke")
+    def revoke_phone() -> dict[str, bool]:
+        context.phone.revoke()
+        return {"disconnected": True}
+
+    @app.get("/phone", response_class=HTMLResponse)
+    def phone_page(request: Request, invite: str | None = None) -> Any:
+        if invite:
+            if not context.phone.valid_invitation(invite):
+                raise HTTPException(
+                    status_code=403, detail="This phone link has expired or was used."
+                )
+            return templates.TemplateResponse(
+                request=request,
+                name="phone-connect.html",
+                context={"invite": invite, "device_name": context.identity.name},
+            )
+        session = require_phone(request)
+        return templates.TemplateResponse(
+            request=request,
+            name="phone.html",
+            context={"phone_token": session.csrf_token, "device_name": context.identity.name},
+        )
+
+    @app.post("/phone/connect")
+    def connect_phone(
+        invite: Annotated[str, Form(min_length=20, max_length=100)],
+    ) -> RedirectResponse:
+        redeemed = context.phone.redeem(invite)
+        if redeemed is None:
+            raise HTTPException(status_code=403, detail="This phone link has expired or was used.")
+        cookie, _ = redeemed
+        response = RedirectResponse("/phone", status_code=303)
+        response.set_cookie(
+            PHONE_COOKIE_NAME,
+            cookie,
+            max_age=PHONE_SESSION_TTL_SECONDS,
+            path="/phone",
+            secure=True,
+            httponly=True,
+            samesite="lax",
+        )
+        return response
+
+    @app.get("/phone/api/state")
+    def phone_state(session: PhoneSession = Depends(require_phone)) -> dict[str, Any]:
+        return {
+            "available": [
+                {"id": item.id, "name": item.relative_path, "size": item.size}
+                for item in context.transfers.list_staged()
+            ],
+            "uploaded": context.phone.uploaded_files(session),
+            "expires_at": session.expires_at,
+        }
+
+    @app.post("/phone/api/files")
+    async def phone_upload(
+        request: Request,
+        filename: Annotated[str, Query(min_length=1, max_length=255)],
+        session: PhoneSession = Depends(require_phone),
+    ) -> dict[str, Any]:
+        if not secrets.compare_digest(
+            request.headers.get("X-Relay-Phone-Token", ""), session.csrf_token
+        ):
+            raise HTTPException(status_code=403, detail="The phone session could not be verified.")
+        try:
+            return await context.phone.receive_file(
+                session,
+                context.settings.load().destination,
+                filename,
+                request.stream(),
+            )
+        except ClientDisconnect:
+            raise HTTPException(status_code=499, detail="The phone disconnected.") from None
+        except (TransferError, OSError) as error:
+            raise HTTPException(status_code=400, detail=str(error)) from error
+
+    @app.get("/phone/api/files/{item_id}", response_class=FileResponse)
+    def phone_download(
+        item_id: str, session: PhoneSession = Depends(require_phone)
+    ) -> FileResponse:
+        item = next(
+            (candidate for candidate in context.transfers.list_staged() if candidate.id == item_id),
+            None,
+        )
+        if item is None or not item.path.is_file():
+            raise HTTPException(status_code=404, detail="This file is no longer available.")
+        return FileResponse(item.path, filename=Path(item.relative_path).name)
 
     @app.get("/api/v1/status")
     def status() -> dict[str, Any]:
@@ -210,6 +331,7 @@ def create_app(context: AppContext) -> FastAPI:
             "staged": staged(),
             "outgoing": outgoing_transfers(),
             "incoming": incoming_transfers(),
+            "phone_uploads": context.phone.recent_uploads(),
         }
 
     @app.get("/api/v1/peers")

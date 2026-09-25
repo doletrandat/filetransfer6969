@@ -8,15 +8,15 @@ web
 
 ## Stack
 
-FastAPI backend with a vanilla HTML, CSS, and JavaScript interface. Windows is the first supported runtime. Zeroconf provides local discovery; browser-compatible cryptography provides encrypted transport.
+FastAPI backend with a vanilla HTML, CSS, and JavaScript interface. Windows runs the Relay service; phones can connect through a browser on the same local network. Zeroconf provides discovery between Windows services; HTTPS protects local transfers.
 
 ## Users
 
-General consumers transferring files and folders between Windows devices on the same local network, primarily when cloud upload, accounts, or internet access are inconvenient or unavailable.
+People transferring files and folders between Windows devices, or individual files between a Windows computer and a phone browser, on the same local network.
 
 ## Product Purpose
 
-Move files directly between trusted devices without a cloud service. Success means a consumer can discover or pair a nearby device, choose files or folders, see clear progress, and receive a collision-safe result.
+Move files directly between trusted devices without a cloud service. Windows peers can discover and pair with each other; a phone can connect by a one-time QR link to upload or download files through the Windows service.
 
 ## Positioning
 
@@ -24,17 +24,18 @@ Direct local transfer with both automatic discovery and explicit QR/manual pairi
 
 ## Operating Context
 
-The Python service starts on each Windows device and opens a local browser interface. Devices meet on the same LAN. One device selects and sends files or folders; the peer receives them into a configurable destination.
+The Python service starts on each Windows device and opens a local browser interface. Windows peers meet on the same LAN. A phone browser connects to a Windows service through a short-lived QR link and can upload files to its receive folder or download files selected on the computer.
 
 ## Capabilities and Constraints
 
-- Windows is the only supported platform in the first release.
+- Windows is the supported service runtime; Android and iPhone use a browser client and do not run the Python service.
 - Transfer one or more files and complete folders.
 - Support Zeroconf/mDNS discovery and QR or manual-code pairing.
 - Use one-time, expiring pairing authorization and encrypted transport.
 - Show device identity, pairing state, transfer progress, failures, and completion state.
 - Handle large reliable transfers, retry or resume behavior, duplicate filenames, and folder boundaries safely.
 - Do not require accounts, cloud infrastructure, or internet service.
+- Support one-time phone invitations, authorized upload of individual files, and download of files staged on the Windows device.
 - Open-source licensing, installer packaging, background service operation, and public-release distribution remain undecided.
 
 ## Brand Commitments

@@ -5,10 +5,13 @@ const state = {
   staged: [],
   outgoing: [],
   incoming: [],
+  phoneUploads: [],
+  hasSnapshot: false,
   selectedPeerId: null,
   ticket: null,
   uploading: false,
   uploadProgress: null,
+  phoneInvite: null,
 };
 
 const controlToken = document.querySelector('meta[name="relay-control-token"]').content;
@@ -23,6 +26,19 @@ const elements = {
   pairingCode: document.querySelector("#pairingCode"),
   pairMessage: document.querySelector("#pairMessage"),
   createCodeButton: document.querySelector("#createCodeButton"),
+  phoneConnectButton: document.querySelector("#phoneConnectButton"),
+  phoneInvite: document.querySelector("#phoneInvite"),
+  phoneInviteQr: document.querySelector("#phoneInviteQr"),
+  phoneInviteLink: document.querySelector("#phoneInviteLink"),
+  phoneDisconnectButton: document.querySelector("#phoneDisconnectButton"),
+  phoneUploadCount: document.querySelector("#phoneUploadCount"),
+  enableNotificationsButton: document.querySelector("#enableNotificationsButton"),
+  latestPhoneUpload: document.querySelector("#latestPhoneUpload"),
+  latestPhoneName: document.querySelector("#latestPhoneName"),
+  latestPhoneDetail: document.querySelector("#latestPhoneDetail"),
+  latestPhonePath: document.querySelector("#latestPhonePath"),
+  copyPhonePathButton: document.querySelector("#copyPhonePathButton"),
+  phoneUploadsList: document.querySelector("#phoneUploadsList"),
   pairingTicket: document.querySelector("#pairingTicket"),
   pairingQr: document.querySelector("#pairingQr"),
   ticketCode: document.querySelector("#ticketCode"),
@@ -50,7 +66,6 @@ const elements = {
   settingsForm: document.querySelector("#settingsForm"),
   settingsMessage: document.querySelector("#settingsMessage"),
   fingerprint: document.querySelector("#fingerprint"),
-  routeCart: document.querySelector("#routeCart"),
   toast: document.querySelector("#toast"),
 };
 
@@ -73,7 +88,7 @@ async function api(path, options = {}) {
     });
   } catch (error) {
     if (error.name === "AbortError") {
-      throw new Error("Relay is not responding. Retrying…");
+      throw new Error("Relay chưa phản hồi. Đang thử lại…");
     }
     throw error;
   } finally {
@@ -81,7 +96,7 @@ async function api(path, options = {}) {
   }
   if (!response.ok) {
     const payload = await response.json().catch(() => ({}));
-    throw new Error(payload.detail || "Relay could not complete that action.");
+    throw new Error(payload.detail || "Không thực hiện được thao tác này.");
   }
   if (response.status === 204) {
     return null;
@@ -106,7 +121,7 @@ function formatBytes(value) {
 }
 
 function formatSpeed(value) {
-  if (!value) return "calculating";
+  if (!value) return "đang tính";
   const units = ["B/s", "KB/s", "MB/s", "GB/s"];
   const index = Math.min(Math.floor(Math.log(value) / Math.log(1024)), units.length - 1);
   return `${(value / 1024 ** index).toFixed(index > 1 ? 1 : 0)} ${units[index]}`;
@@ -126,7 +141,7 @@ function inferBatchName() {
   if (state.staged.length === 1) return fileName(state.staged[0].relative_path);
   const roots = new Set(state.staged.map((item) => item.relative_path.replaceAll("\\", "/").split("/")[0]));
   if (roots.size === 1) return [...roots][0];
-  return `Relay transfer ${new Date().toLocaleDateString()}`;
+  return `Lượt gửi ${new Date().toLocaleDateString("vi-VN")}`;
 }
 
 function showToast(message, error = false) {
@@ -150,23 +165,16 @@ function renderStatus() {
   elements.deviceName.textContent = device.name;
   elements.deviceAddress.textContent = addresses.find((address) => !address.startsWith("127.")) || "This device";
   elements.fingerprint.textContent = device.fingerprint;
-  elements.destinationInput.value = destination;
+  if (document.activeElement !== elements.destinationInput) elements.destinationInput.value = destination;
   const hasDevices = state.devices.length > 0;
-  elements.discoveryText.textContent = hasDevices ? `${state.devices.length} nearby` : "Listening";
-  elements.discoveryLamp.style.color = hasDevices ? "var(--ready)" : "var(--cobalt)";
+  elements.discoveryText.textContent = hasDevices ? `${state.devices.length} máy gần đây` : "Đang tìm";
+  elements.discoveryLamp.style.background = hasDevices ? "var(--green)" : "var(--blue)";
 }
 
 function renderDevices() {
   if (!state.devices.length) {
     elements.deviceList.innerHTML = `
-      <div class="empty-station">
-        <svg viewBox="0 0 48 48" aria-hidden="true">
-          <rect x="8" y="6" width="32" height="24" rx="3"></rect>
-          <path d="M13 35h22M19 42h10M17 36v6M31 36v6"></path>
-        </svg>
-        <strong>Looking for nearby stations</strong>
-        <span>Keep both devices awake and connected to the same Wi-Fi or Ethernet network.</span>
-      </div>`;
+      <p class="empty-message">Chưa thấy máy tính nào. Hãy mở Relay trên máy còn lại và kiểm tra cả hai dùng chung mạng.</p>`;
     return;
   }
   const pairedIds = new Set(state.peers.map((peer) => peer.id));
@@ -180,35 +188,34 @@ function renderDevices() {
           <span class="device-name">${escapeHtml(device.name)}</span>
           <span class="device-address">${escapeHtml(device.host)}:${device.port} · ${escapeHtml(device.fingerprint.slice(0, 11))}</span>
         </span>
-        <span class="device-state">${connected ? "Authorized" : selected ? "Selected" : "Ready"}</span>
+        <span class="device-state">${connected ? "Đã kết nối" : selected ? "Đã chọn" : "Sẵn sàng"}</span>
       </button>`;
   }).join("");
 }
 
 function renderTarget() {
   const peer = state.peers.find((candidate) => candidate.id === state.selectedPeerId);
-  elements.targetStamp.textContent = peer?.name || "Not selected";
+  elements.targetStamp.textContent = peer?.name || "Chưa chọn";
   elements.transferSubtitle.textContent = peer
-    ? `Files will move directly to ${peer.name}.`
-    : "Pair with a nearby device to begin.";
+    ? `Các tệp sẽ được gửi trực tiếp đến ${peer.name}. Tệp đã chọn cũng hiện trên điện thoại đã kết nối để tải về.`
+    : "Chọn máy tính đã kết nối để gửi. Nếu gửi cho điện thoại, tệp được chọn sẽ hiện trên điện thoại để tải về.";
   const ready = Boolean(peer && state.staged.length && !state.uploading);
   elements.sendButton.disabled = !ready;
-  elements.sendButton.querySelector("span").textContent = peer ? "Open transfer route" : "Select an authorized device";
+  elements.sendButton.querySelector("span").textContent = peer ? `Gửi đến ${peer.name}` : "Chọn máy tính nhận";
 }
 
 function renderStaged() {
   const total = state.staged.reduce((sum, item) => sum + item.size, 0);
   if (state.uploading && state.uploadProgress) {
-    elements.queueSummary.textContent = `Uploading ${state.uploadProgress.name} · ${percent(state.uploadProgress.loaded, state.uploadProgress.total)}%`;
+    elements.queueSummary.textContent = `Đang tải ${state.uploadProgress.name} · ${percent(state.uploadProgress.loaded, state.uploadProgress.total)}%`;
   } else {
     elements.queueSummary.textContent = state.staged.length
-      ? `${state.staged.length} ${state.staged.length === 1 ? "item" : "items"} · ${formatBytes(total)}`
-      : "No files loaded";
+      ? `${state.staged.length} tệp · ${formatBytes(total)}`
+      : "Chưa chọn tệp";
   }
   elements.clearStagedButton.disabled = !state.staged.length || state.uploading;
-  elements.routeCart.classList.toggle("has-load", state.staged.length > 0);
   if (!state.staged.length) {
-    elements.stagedList.innerHTML = `<p class="queue-empty">${state.uploading ? "Loading files into Relay…" : "Files you choose will be held here until the transfer starts."}</p>`;
+    elements.stagedList.innerHTML = `<p class="empty-message">${state.uploading ? "Đang thêm tệp…" : "Tệp đã chọn sẽ hiển thị tại đây."}</p>`;
     return;
   }
   elements.stagedList.innerHTML = state.staged.map((item) => `
@@ -220,7 +227,7 @@ function renderStaged() {
         <span class="file-card-name" title="${escapeHtml(item.relative_path)}">${escapeHtml(fileName(item.relative_path))}</span>
         <span class="file-card-size">${escapeHtml(item.relative_path)} · ${formatBytes(item.size)}</span>
       </span>
-      <button class="file-card-remove" type="button" data-remove-item="${escapeHtml(item.id)}" aria-label="Remove ${escapeHtml(fileName(item.relative_path))}">
+      <button class="file-card-remove" type="button" data-remove-item="${escapeHtml(item.id)}" aria-label="Bỏ ${escapeHtml(fileName(item.relative_path))}">
         <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M4 4l12 12M16 4L4 16"></path></svg>
       </button>
     </div>`).join("");
@@ -231,15 +238,15 @@ function transferCard(transfer, direction) {
   const progress = percent(transferred, transfer.total_bytes);
   const target = direction === "outgoing" ? transfer.peer_name : transfer.source.name;
   const speed = transfer.speed_bps ? ` · ${formatSpeed(transfer.speed_bps)}` : "";
-  const stateLabel = transfer.status === "complete" ? "Complete" : transfer.status === "failed" ? "Needs attention" : transfer.status === "waiting" ? "Waiting to resume" : direction === "outgoing" ? "Sending" : "Receiving";
+  const stateLabel = transfer.status === "complete" ? "Hoàn tất" : transfer.status === "failed" ? "Cần xử lý" : transfer.status === "waiting" ? "Chờ tiếp tục" : direction === "outgoing" ? "Đang gửi" : "Đang nhận";
   const retry = direction === "outgoing" && transfer.status === "failed"
-    ? `<button class="retry-button" type="button" data-retry-transfer="${escapeHtml(transfer.id)}">Retry remaining files</button>`
+    ? `<button class="retry-button" type="button" data-retry-transfer="${escapeHtml(transfer.id)}">Thử gửi lại</button>`
     : "";
   return `
     <div class="transfer-card">
       <div>
         <h4 title="${escapeHtml(transfer.batch_name)}">${escapeHtml(transfer.batch_name)}</h4>
-        <span class="transfer-meta">${escapeHtml(target)} · ${progress}% · ${formatBytes(transferred)} of ${formatBytes(transfer.total_bytes)}${speed}</span>
+        <span class="transfer-meta">${escapeHtml(target)} · ${progress}% · ${formatBytes(transferred)} / ${formatBytes(transfer.total_bytes)}${speed}</span>
       </div>
       <span class="transfer-state ${escapeHtml(transfer.status)}">${stateLabel}</span>
       <div class="transfer-track" role="progressbar" aria-label="${escapeHtml(transfer.batch_name)}" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${progress}">
@@ -253,10 +260,35 @@ function transferCard(transfer, direction) {
 function renderTransfers() {
   elements.outgoingList.innerHTML = state.outgoing.length
     ? state.outgoing.map((transfer) => transferCard(transfer, "outgoing")).join("")
-    : `<p class="queue-empty">No outgoing transfers yet.</p>`;
+    : `<p class="empty-message">Chưa gửi tệp nào.</p>`;
   elements.incomingList.innerHTML = state.incoming.length
     ? state.incoming.map((transfer) => transferCard(transfer, "incoming")).join("")
-    : `<p class="queue-empty">No incoming transfers yet.</p>`;
+    : `<p class="empty-message">Chưa nhận tệp nào.</p>`;
+}
+
+function updateNotificationButton() {
+  if (!("Notification" in window)) {
+    elements.enableNotificationsButton.hidden = true;
+    return;
+  }
+  elements.enableNotificationsButton.textContent = Notification.permission === "granted"
+    ? "Thông báo đã bật" : "Bật thông báo trên máy tính";
+  elements.enableNotificationsButton.disabled = Notification.permission === "granted";
+}
+
+function renderPhoneUploads() {
+  const items = state.phoneUploads;
+  elements.phoneUploadCount.textContent = `${items.length} tệp gần đây`;
+  const latest = items[0];
+  elements.latestPhoneUpload.hidden = !latest;
+  if (latest) {
+    elements.latestPhoneName.textContent = `Đã nhận ${latest.name}`;
+    elements.latestPhoneDetail.textContent = `${formatBytes(latest.size)} · ${latest.folder} · ${new Date(latest.received_at * 1000).toLocaleString("vi-VN")}`;
+    elements.latestPhonePath.textContent = latest.path;
+  }
+  elements.phoneUploadsList.innerHTML = items.length
+    ? items.slice(1, 8).map((item) => `<div class="phone-upload-row"><div><strong>${escapeHtml(item.name)}</strong><span>${escapeHtml(item.folder)} · ${formatBytes(item.size)}</span></div><span>${new Date(item.received_at * 1000).toLocaleString("vi-VN")}</span></div>`).join("")
+    : `<p class="empty-message">Chưa nhận tệp nào từ điện thoại. Tạo mã QR bên dưới để bắt đầu.</p>`;
 }
 
 function renderTicket() {
@@ -274,7 +306,7 @@ function renderTicket() {
   elements.ticketCode.textContent = state.ticket.code;
   const minutes = Math.floor(remaining / 60);
   const seconds = String(remaining % 60).padStart(2, "0");
-  elements.ticketCountdown.textContent = `Expires in ${minutes}:${seconds}`;
+  elements.ticketCountdown.textContent = `Hết hạn sau ${minutes}:${seconds}`;
 }
 
 function renderAll() {
@@ -283,6 +315,7 @@ function renderAll() {
   renderTarget();
   renderStaged();
   renderTransfers();
+  renderPhoneUploads();
   renderTicket();
 }
 
@@ -298,11 +331,22 @@ async function refresh() {
     state.staged = payload.staged;
     state.outgoing = payload.outgoing;
     state.incoming = payload.incoming;
+    const previousIds = new Set(state.phoneUploads.map((item) => item.id));
+    const newUploads = (payload.phone_uploads || []).filter((item) => !previousIds.has(item.id));
+    state.phoneUploads = payload.phone_uploads || [];
     if (state.selectedPeerId && !state.peers.some((peer) => peer.id === state.selectedPeerId)) {
       state.selectedPeerId = null;
     }
     if (!state.selectedPeerId && state.peers.length) state.selectedPeerId = state.peers[0].id;
     renderAll();
+    if (state.hasSnapshot && newUploads.length) {
+      const message = newUploads.length === 1 ? `Đã nhận ${newUploads[0].name} từ điện thoại` : `Đã nhận ${newUploads.length} tệp từ điện thoại`;
+      showToast(message);
+      if ("Notification" in window && Notification.permission === "granted") {
+        try { new Notification("Relay · Tệp mới từ điện thoại", { body: message }); } catch (_) { /* The in-page notice remains visible. */ }
+      }
+    }
+    state.hasSnapshot = true;
   })().finally(() => {
     refreshPromise = null;
   });
@@ -314,18 +358,47 @@ async function createCode() {
     state.ticket = await api("/api/v1/pairing/code", { method: "POST" });
     elements.pairingQr.src = state.ticket.qr_data_url;
     renderTicket();
-    setPairMessage("Let the sending device scan this code or type it there.");
+    setPairMessage("Quét mã này hoặc nhập mã trên máy tính còn lại.");
   } catch (error) {
     setPairMessage(error.message, true);
   }
 }
 
+async function connectPhone() {
+  elements.phoneConnectButton.disabled = true;
+  try {
+    state.phoneInvite = await api("/api/v1/phone/invite", { method: "POST" });
+    elements.phoneInviteQr.src = state.phoneInvite.qr_data_url;
+    elements.phoneInviteLink.href = state.phoneInvite.url;
+    elements.phoneInviteLink.textContent = state.phoneInvite.url;
+    elements.phoneInvite.hidden = false;
+    showToast("Dùng camera điện thoại quét mã QR để kết nối.");
+  } catch (error) {
+    showToast(error.message, true);
+  } finally {
+    elements.phoneConnectButton.disabled = false;
+  }
+}
+
+async function disconnectPhone() {
+  try {
+    await api("/api/v1/phone/revoke", { method: "POST" });
+    state.phoneInvite = null;
+    elements.phoneInvite.hidden = true;
+    elements.phoneInviteQr.removeAttribute("src");
+    elements.phoneInviteLink.removeAttribute("href");
+    showToast("Đã ngắt kết nối điện thoại.");
+  } catch (error) {
+    showToast(error.message, true);
+  }
+}
+
 async function pairValues(code, endpoint = null, fingerprint = null) {
   if (code.length !== 8) {
-    setPairMessage("Enter the complete 8-character code.", true);
+    setPairMessage("Nhập đủ 8 ký tự của mã ghép nối.", true);
     return;
   }
-  setPairMessage("Checking the device and security fingerprint…");
+  setPairMessage("Đang kiểm tra máy tính…");
   try {
     const peer = await api("/api/v1/pair", {
       method: "POST",
@@ -336,7 +409,7 @@ async function pairValues(code, endpoint = null, fingerprint = null) {
     state.selectedPeerId = peer.id;
     state.ticket = null;
     elements.pairingCode.value = "";
-    setPairMessage(`${peer.name} is authorized for this session.`);
+    setPairMessage(`Đã kết nối với ${peer.name}.`);
     renderAll();
   } catch (error) {
     setPairMessage(error.message, true);
@@ -365,14 +438,14 @@ let scannerStream = null;
 
 async function scanQrCode() {
   if (!navigator.mediaDevices?.getUserMedia || !("BarcodeDetector" in window)) {
-    setPairMessage("This browser cannot scan QR codes. Type the code instead.", true);
+    setPairMessage("Trình duyệt không quét được mã QR. Hãy nhập mã ghép nối.", true);
     return;
   }
   try {
     scannerStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
     elements.scanVideo.srcObject = scannerStream;
     elements.scanPanel.hidden = false;
-    elements.scanMessage.textContent = "Point the camera at the receiver's QR code.";
+    elements.scanMessage.textContent = "Hướng camera vào mã QR trên máy nhận.";
     await elements.scanVideo.play();
     const detector = new BarcodeDetector({ formats: ["qr_code"] });
     const scan = async () => {
@@ -391,7 +464,7 @@ async function scanQrCode() {
     scannerFrame = requestAnimationFrame(scan);
   } catch (error) {
     stopScanner();
-    setPairMessage("Camera access was not available. Type the code instead.", true);
+    setPairMessage("Không mở được camera. Hãy nhập mã ghép nối.", true);
   }
 }
 
@@ -470,7 +543,7 @@ async function send() {
         item_ids: state.staged.map((item) => item.id),
       }),
     });
-    showToast(`Transfer route opened to ${peer.name}.`);
+    showToast(`Đang gửi tệp đến ${peer.name}.`);
     await refresh();
   } catch (error) {
     showToast(error.message, true);
@@ -484,7 +557,7 @@ elements.deviceList.addEventListener("click", (event) => {
   const paired = state.peers.find((peer) => peer.id === deviceId);
   state.selectedPeerId = deviceId;
   if (!paired) {
-    setPairMessage(`Enter the code shown on ${row.querySelector(".device-name").textContent}.`);
+    setPairMessage(`Nhập mã hiển thị trên ${row.querySelector(".device-name").textContent}.`);
     elements.pairingCode.focus();
   }
   renderAll();
@@ -527,7 +600,7 @@ elements.clearStagedButton.addEventListener("click", async () => {
 
 elements.settingsForm.addEventListener("submit", async (event) => {
   event.preventDefault();
-  elements.settingsMessage.textContent = "Saving…";
+  elements.settingsMessage.textContent = "Đang lưu…";
   elements.settingsMessage.classList.remove("error");
   try {
     const result = await api("/api/v1/settings", {
@@ -536,7 +609,7 @@ elements.settingsForm.addEventListener("submit", async (event) => {
       body: JSON.stringify({ destination: elements.destinationInput.value }),
     });
     elements.destinationInput.value = result.destination;
-    elements.settingsMessage.textContent = "Receive folder saved.";
+    elements.settingsMessage.textContent = "Đã lưu thư mục nhận tệp.";
   } catch (error) {
     elements.settingsMessage.textContent = error.message;
     elements.settingsMessage.classList.add("error");
@@ -545,6 +618,24 @@ elements.settingsForm.addEventListener("submit", async (event) => {
 
 elements.pairForm.addEventListener("submit", pairDevice);
 elements.createCodeButton.addEventListener("click", createCode);
+elements.phoneConnectButton.addEventListener("click", connectPhone);
+elements.phoneDisconnectButton.addEventListener("click", disconnectPhone);
+elements.enableNotificationsButton.addEventListener("click", async () => {
+  if (!("Notification" in window)) return;
+  const permission = await Notification.requestPermission();
+  updateNotificationButton();
+  showToast(permission === "granted" ? "Thông báo đã bật." : "Chưa bật thông báo. Tệp mới vẫn hiện trong Hộp thư đến.");
+});
+elements.copyPhonePathButton.addEventListener("click", async () => {
+  const path = state.phoneUploads[0]?.path;
+  if (!path) return;
+  try {
+    await navigator.clipboard.writeText(path);
+    showToast("Đã sao chép đường dẫn. Dán vào File Explorer để mở tệp.");
+  } catch (_) {
+    showToast("Không sao chép được. Hãy chọn đường dẫn hiển thị và sao chép thủ công.", true);
+  }
+});
 elements.newCodeButton.addEventListener("click", createCode);
 elements.scanCodeButton.addEventListener("click", scanQrCode);
 elements.closeScannerButton.addEventListener("click", stopScanner);
@@ -571,12 +662,10 @@ elements.dropZone.addEventListener("drop", (event) => uploadFiles(event.dataTran
 let refreshTimer = 0;
 
 async function pollState() {
-  if (!document.hidden) {
-    try {
-      await refresh();
-    } catch (error) {
-      setPairMessage(error.message, true);
-    }
+  try {
+    await refresh();
+  } catch (error) {
+    setPairMessage(error.message, true);
   }
   window.clearTimeout(refreshTimer);
   const hasActiveTransfer = state.outgoing.some((transfer) => ["preparing", "sending"].includes(transfer.status))
@@ -591,4 +680,5 @@ document.addEventListener("visibilitychange", () => {
 });
 window.addEventListener("online", pollState);
 window.setInterval(renderTicket, 1000);
+updateNotificationButton();
 pollState();
