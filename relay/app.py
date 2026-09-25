@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import base64
 import io
+import ipaddress
+import secrets
 import socket
 from pathlib import Path
 from typing import Annotated, Any
@@ -38,6 +40,7 @@ class AppContext:
     def __init__(self, data_dir: Path, port: int) -> None:
         self.data_dir = data_dir
         self.port = port
+        self.control_token = secrets.token_urlsafe(32)
         self.data_dir.mkdir(parents=True, exist_ok=True)
         self.settings = SettingsStore(data_dir)
         self.settings.load()
@@ -97,6 +100,22 @@ def create_app(context: AppContext) -> FastAPI:
 
     @app.middleware("http")
     async def security_headers(request: Request, call_next: RequestResponseEndpoint) -> Response:
+        path = request.url.path
+        local_route = path == "/" or (
+            path.startswith("/api/v1/") and not path.startswith("/api/v1/remote/")
+        )
+        if local_route:
+            client_host = request.client.host if request.client else ""
+            try:
+                local_client = ipaddress.ip_address(client_host).is_loopback
+            except ValueError:
+                local_client = False
+            if not local_client or request.url.hostname not in {"127.0.0.1", "localhost", "::1"}:
+                return Response(status_code=403)
+            if path.startswith("/api/v1/") and request.method not in {"GET", "HEAD", "OPTIONS"}:
+                supplied = request.headers.get("X-Relay-Control-Token", "")
+                if not secrets.compare_digest(supplied, context.control_token):
+                    return Response(status_code=403)
         response = await call_next(request)
         response.headers["Content-Security-Policy"] = (
             "default-src 'self'; img-src 'self' data:; style-src 'self'; script-src 'self'; "
@@ -105,11 +124,15 @@ def create_app(context: AppContext) -> FastAPI:
         response.headers["Referrer-Policy"] = "no-referrer"
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["X-Frame-Options"] = "DENY"
+        if local_route:
+            response.headers["Cache-Control"] = "no-store"
         return response
 
     @app.get("/", response_class=HTMLResponse)
     def index(request: Request) -> Any:
-        return templates.TemplateResponse(request=request, name="index.html")
+        return templates.TemplateResponse(
+            request=request, name="index.html", context={"control_token": context.control_token}
+        )
 
     @app.get("/api/v1/status")
     def status() -> dict[str, Any]:
@@ -309,13 +332,17 @@ def create_app(context: AppContext) -> FastAPI:
         payload: dict[str, Any],
         peer: AuthorizedPeer = Depends(require_session),
     ) -> dict[str, Any]:
-        del peer
         try:
             request_model = IncomingManifestRequest.model_validate(payload)
         except ValueError as error:
             raise HTTPException(
                 status_code=422, detail="The transfer manifest is invalid."
             ) from error
+        if (
+            request_model.source.id != peer.id
+            or request_model.source.fingerprint.upper() != peer.fingerprint.upper()
+        ):
+            raise HTTPException(status_code=403, detail="The paired device identity did not match.")
         try:
             return context.transfers.create_incoming(request_model).model_dump()
         except TransferError as error:
@@ -328,8 +355,8 @@ def create_app(context: AppContext) -> FastAPI:
         request: Request,
         peer: AuthorizedPeer = Depends(require_session),
     ) -> dict[str, str]:
-        del peer
         try:
+            context.transfers.require_incoming_peer(transfer_id, peer.id, peer.fingerprint)
             await context.transfers.receive_file(transfer_id, item_id, request.stream())
         except TransferError as error:
             raise HTTPException(status_code=400, detail=str(error)) from error
@@ -348,8 +375,8 @@ def create_app(context: AppContext) -> FastAPI:
         final: bool,
         peer: AuthorizedPeer = Depends(require_session),
     ) -> dict[str, Any] | Response:
-        del peer
         try:
+            context.transfers.require_incoming_peer(transfer_id, peer.id, peer.fingerprint)
             return await context.transfers.receive_chunk(
                 transfer_id=transfer_id,
                 item_id=item_id,
@@ -368,8 +395,8 @@ def create_app(context: AppContext) -> FastAPI:
         transfer_id: str,
         peer: AuthorizedPeer = Depends(require_session),
     ) -> dict[str, Any]:
-        del peer
         try:
+            context.transfers.require_incoming_peer(transfer_id, peer.id, peer.fingerprint)
             return context.transfers.incoming_status(transfer_id).public_dict()
         except TransferError as error:
             raise HTTPException(status_code=404, detail=str(error)) from error

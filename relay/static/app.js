@@ -11,6 +11,8 @@ const state = {
   uploadProgress: null,
 };
 
+const controlToken = document.querySelector('meta[name="relay-control-token"]').content;
+
 const elements = {
   deviceName: document.querySelector("#deviceName"),
   deviceAddress: document.querySelector("#deviceAddress"),
@@ -63,6 +65,9 @@ async function api(path, options = {}) {
       signal: controller.signal,
       headers: {
         ...(fetchOptions.body instanceof Blob ? { "Content-Type": "application/octet-stream" } : {}),
+        ...(fetchOptions.method && fetchOptions.method !== "GET"
+          ? { "X-Relay-Control-Token": controlToken }
+          : {}),
         ...(fetchOptions.headers || {}),
       },
     });
@@ -226,7 +231,7 @@ function transferCard(transfer, direction) {
   const progress = percent(transferred, transfer.total_bytes);
   const target = direction === "outgoing" ? transfer.peer_name : transfer.source.name;
   const speed = transfer.speed_bps ? ` · ${formatSpeed(transfer.speed_bps)}` : "";
-  const stateLabel = transfer.status === "complete" ? "Complete" : transfer.status === "failed" ? "Needs attention" : direction === "outgoing" ? "Sending" : "Receiving";
+  const stateLabel = transfer.status === "complete" ? "Complete" : transfer.status === "failed" ? "Needs attention" : transfer.status === "waiting" ? "Waiting to resume" : direction === "outgoing" ? "Sending" : "Receiving";
   const retry = direction === "outgoing" && transfer.status === "failed"
     ? `<button class="retry-button" type="button" data-retry-transfer="${escapeHtml(transfer.id)}">Retry remaining files</button>`
     : "";

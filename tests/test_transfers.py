@@ -211,3 +211,48 @@ def test_incoming_chunk_rejects_invalid_digest(tmp_path: Path) -> None:
         )
 
     assert not (Path(transfer.destination) / "file.bin").exists()
+
+
+def test_staged_and_partial_incoming_survive_restart(tmp_path: Path) -> None:
+    data_dir = tmp_path / "data"
+
+    def manager() -> TransferManager:
+        return TransferManager(
+            data_dir, SettingsStore(data_dir),
+            DeviceIdentity(id="local", name="Local PC", fingerprint="A" * 64),
+            cast(DiscoveryManager, EmptyDiscovery()),
+        )
+
+    first = manager()
+    content = b"content that spans two chunks"
+    staged = asyncio.run(first.stage("folder/file.bin", stream_bytes(content)))
+    manifest = IncomingManifestRequest(
+        batch_name="batch",
+        source=DeviceMessage(id="remote", name="Remote PC", fingerprint="B" * 64),
+        items=[TransferManifestItem(
+            id=staged.id, relative_path=staged.relative_path,
+            size=staged.size, sha256=staged.sha256,
+        )],
+    )
+    transfer = first.create_incoming(manifest)
+    asyncio.run(first.receive_chunk(
+        transfer.transfer_id, staged.id, 0, len(content), False, stream_bytes(content[:8])
+    ))
+    target = first.incoming_status(transfer.transfer_id).items[0].target
+    part_path = target.with_name(f".{target.name}.{staged.id}.part")
+    with part_path.open("ab") as output:
+        output.write(b"uncommitted bytes")
+
+    restored = manager()
+    assert restored.list_staged()[0].id == staged.id
+    assert restored.incoming_status(transfer.transfer_id).status == "waiting"
+    assert restored.incoming_status(transfer.transfer_id).received_bytes == 8
+    assert part_path.stat().st_size == 8
+    duplicate = asyncio.run(restored.receive_chunk(
+        transfer.transfer_id, staged.id, 0, len(content), False, stream_bytes(content[:8])
+    ))
+    assert duplicate["received_bytes"] == 8
+    asyncio.run(restored.receive_chunk(
+        transfer.transfer_id, staged.id, 8, len(content), True, stream_bytes(content[8:])
+    ))
+    assert (Path(transfer.destination) / "folder" / "file.bin").read_bytes() == content

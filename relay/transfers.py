@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 import re
-import shutil
 import threading
 import time
 import uuid
@@ -251,13 +251,16 @@ class TransferManager:
         self._discovery = discovery
         self._staging_dir = data_dir / "staging"
         self._staging_dir.mkdir(parents=True, exist_ok=True)
+        self._state_path = data_dir / "transfer-state.json"
         self._staged: dict[str, StagedItem] = {}
         self._uploads: dict[str, ChunkedUpload] = {}
         self._outgoing: dict[str, OutgoingTransfer] = {}
         self._incoming: dict[str, IncomingTransfer] = {}
         self._peers: dict[str, PeerSession] = {}
         self._lock = threading.RLock()
-        self._clean_staging()
+        self._load_state()
+        for orphan in self._staging_dir.glob(".*.part"):
+            orphan.unlink(missing_ok=True)
 
     async def stage(self, relative_path: str, stream: AsyncIterable[bytes]) -> StagedItem:
         safe_path = sanitize_relative_path(relative_path)
@@ -288,6 +291,7 @@ class TransferManager:
             raise
         with self._lock:
             self._staged[item_id] = item
+            self._save_state()
         return item
 
     async def stage_chunk(
@@ -383,6 +387,7 @@ class TransferManager:
         with self._lock:
             upload.item = item
             self._staged[item_id] = item
+            self._save_state()
         return {"received": item.size, "complete": True, "item": item.public_dict()}
 
     def list_staged(self) -> list[StagedItem]:
@@ -392,6 +397,8 @@ class TransferManager:
     def remove_staged(self, item_id: str) -> bool:
         with self._lock:
             item = self._staged.pop(item_id, None)
+            if item is not None:
+                self._save_state()
         if item is None:
             return False
         item.path.unlink(missing_ok=True)
@@ -401,6 +408,7 @@ class TransferManager:
         with self._lock:
             items = list(self._staged.values())
             self._staged.clear()
+            self._save_state()
         for item in items:
             item.path.unlink(missing_ok=True)
         return len(items)
@@ -547,15 +555,25 @@ class TransferManager:
         )
         with self._lock:
             self._outgoing[transfer.id] = transfer
+            self._save_state()
         return transfer
 
     def run_outgoing(self, transfer_id: str) -> None:
         with self._lock:
             transfer = self._outgoing.get(transfer_id)
             peer = self._peers.get(transfer.peer_id) if transfer else None
-            items = [self._staged[item_id] for item_id in transfer.item_ids] if transfer else []
-        if transfer is None or peer is None:
+            items = [self._staged.get(item_id) for item_id in transfer.item_ids] if transfer else []
+        if transfer is None:
             return
+        if peer is None or any(item is None for item in items):
+            transfer.status = "failed"
+            transfer.error = (
+                "Pair with the receiver again and make sure the selected files are available."
+            )
+            with self._lock:
+                self._save_state()
+            return
+        available_items = [item for item in items if item is not None]
         transfer.status = "sending"
         transfer.error = ""
         transfer.updated_at = time.time()
@@ -572,11 +590,11 @@ class TransferManager:
                 remote_status = status_response.json()
                 transfer.completed_item_ids = list(remote_status.get("completed_item_ids", []))
                 transfer.sent_bytes = sum(
-                    item.size for item in items if item.id in transfer.completed_item_ids
+                    item.size for item in available_items if item.id in transfer.completed_item_ids
                 )
                 transfer.sample_bytes = transfer.sent_bytes
                 transfer.sample_at = time.monotonic()
-                for item in items:
+                for item in available_items:
                     if item.id in transfer.completed_item_ids:
                         continue
                     transfer.current_item_id = item.id
@@ -637,7 +655,11 @@ class TransferManager:
                 transfer.completed_item_ids = list(final_status.get("completed_item_ids", []))
                 transfer.sent_bytes = max(
                     transfer.sent_bytes,
-                    sum(item.size for item in items if item.id in transfer.completed_item_ids),
+                    sum(
+                        item.size
+                        for item in available_items
+                        if item.id in transfer.completed_item_ids
+                    ),
                 )
             transfer.current_item_id = ""
             transfer.status = "complete"
@@ -647,6 +669,8 @@ class TransferManager:
             transfer.error = str(error)
         finally:
             transfer.updated_at = time.time()
+            with self._lock:
+                self._save_state()
 
     def retry_outgoing(self, transfer_id: str) -> OutgoingTransfer:
         with self._lock:
@@ -655,6 +679,8 @@ class TransferManager:
                 raise TransferError("That transfer is no longer available.")
             if transfer.status not in {"failed", "cancelled"}:
                 raise TransferError("Only failed transfers can be retried.")
+            if transfer.peer_id not in self._peers:
+                raise TransferError("Pair with the receiver again before retrying.")
         self.run_outgoing(transfer_id)
         with self._lock:
             return self._outgoing[transfer_id]
@@ -664,6 +690,8 @@ class TransferManager:
             return sorted(self._outgoing.values(), key=lambda item: item.created_at, reverse=True)
 
     def create_incoming(self, request: IncomingManifestRequest) -> IncomingManifestResponse:
+        if any(not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", item.id) for item in request.items):
+            raise TransferError("The transfer manifest contains an invalid file ID.")
         identifiers = [item.id for item in request.items]
         paths = [str(sanitize_relative_path(item.relative_path)) for item in request.items]
         if len(set(identifiers)) != len(identifiers) or len(set(paths)) != len(paths):
@@ -701,6 +729,7 @@ class TransferManager:
         )
         with self._lock:
             self._incoming[transfer.id] = transfer
+            self._save_state()
         return IncomingManifestResponse(
             transfer_id=transfer.id,
             completed_item_ids=transfer.completed_item_ids,
@@ -741,6 +770,7 @@ class TransferManager:
             )
         if transfer is None or item is None:
             raise TransferError("That incoming file is no longer available.")
+        transfer.status = "receiving"
         if total_size != item.size:
             raise TransferError("The incoming file size does not match its manifest.")
         if item.completed:
@@ -782,6 +812,9 @@ class TransferManager:
                 raise
             new_size = item.received_bytes
         if not (final or new_size == item.size):
+            transfer.updated_at = time.time()
+            with self._lock:
+                self._save_state()
             return {"received_bytes": new_size, "complete": False}
         if new_size != item.size or item.digest.hexdigest() != item.sha256:
             raise TransferError(f"{item.relative_path} failed its integrity check.")
@@ -790,6 +823,8 @@ class TransferManager:
         if all(candidate.completed for candidate in transfer.items):
             transfer.status = "complete"
         transfer.updated_at = time.time()
+        with self._lock:
+            self._save_state()
         return {"received_bytes": item.size, "complete": True}
 
     def _incoming_item(self, transfer_id: str, item_id: str) -> IncomingItem:
@@ -810,6 +845,14 @@ class TransferManager:
         if transfer is None:
             raise TransferError("That incoming transfer is no longer available.")
         return transfer
+
+    def require_incoming_peer(self, transfer_id: str, peer_id: str, fingerprint: str) -> None:
+        transfer = self.incoming_status(transfer_id)
+        if (
+            transfer.source.id != peer_id
+            or transfer.source.fingerprint.upper() != fingerprint.upper()
+        ):
+            raise TransferError("This transfer belongs to a different paired device.")
 
     def list_incoming(self) -> list[IncomingTransfer]:
         with self._lock:
@@ -854,9 +897,122 @@ class TransferManager:
         for item_id in set(item_ids) & set(completed):
             self.remove_staged(item_id)
 
-    def _clean_staging(self) -> None:
-        shutil.rmtree(self._staging_dir, ignore_errors=True)
-        self._staging_dir.mkdir(parents=True, exist_ok=True)
+    def _save_state(self) -> None:
+        payload = {
+            "version": 1,
+            "staged": [item.public_dict() for item in self._staged.values()],
+            "outgoing": [item.public_dict() for item in self._outgoing.values()],
+            "incoming": [
+                {
+                    "id": transfer.id,
+                    "batch_name": transfer.batch_name,
+                    "source": transfer.source.model_dump(),
+                    "destination": str(transfer.destination),
+                    "created_at": transfer.created_at,
+                    "items": [
+                        {
+                            "id": item.id,
+                            "relative_path": item.relative_path,
+                            "size": item.size,
+                            "sha256": item.sha256,
+                            "received_bytes": item.received_bytes,
+                        }
+                        for item in transfer.items
+                    ],
+                }
+                for transfer in self._incoming.values()
+            ],
+        }
+        temporary = self._state_path.with_suffix(".tmp")
+        temporary.write_text(json.dumps(payload), encoding="utf-8")
+        os.replace(temporary, self._state_path)
+
+    def _load_state(self) -> None:
+        if not self._state_path.exists():
+            return
+        try:
+            payload = json.loads(self._state_path.read_text(encoding="utf-8"))
+            if payload.get("version") != 1:
+                raise ValueError("unsupported state version")
+            for record in payload.get("staged", []):
+                item_id = str(record["id"])
+                if not re.fullmatch(r"[0-9a-f]{32}", item_id):
+                    continue
+                path = self._staging_dir / item_id
+                size = int(record["size"])
+                if not path.is_file() or path.stat().st_size != size:
+                    continue
+                self._staged[item_id] = StagedItem(
+                    id=item_id,
+                    relative_path=str(sanitize_relative_path(str(record["relative_path"]))),
+                    size=size,
+                    sha256=str(record["sha256"]),
+                    staged_at=float(record["staged_at"]),
+                    path=path,
+                )
+            for record in payload.get("outgoing", []):
+                transfer = OutgoingTransfer(
+                    id=str(record["id"]),
+                    batch_name=str(record["batch_name"]),
+                    peer_id=str(record["peer_id"]),
+                    peer_name=str(record["peer_name"]),
+                    item_ids=list(record["item_ids"]),
+                    total_bytes=int(record["total_bytes"]),
+                    sent_bytes=int(record["sent_bytes"]),
+                    completed_item_ids=list(record["completed_item_ids"]),
+                    destination=str(record["destination"]),
+                    status="complete" if record["status"] == "complete" else "failed",
+                    error=(
+                        "" if record["status"] == "complete"
+                        else "Relay restarted. Pair with the receiver again, then retry."
+                    ),
+                    created_at=float(record["created_at"]),
+                    updated_at=float(record["updated_at"]),
+                )
+                self._outgoing[transfer.id] = transfer
+            for record in payload.get("incoming", []):
+                destination = Path(str(record["destination"]))
+                items = []
+                for saved in record["items"]:
+                    item_id = str(saved["id"])
+                    if not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", item_id):
+                        raise ValueError("invalid saved file ID")
+                    relative_path = str(sanitize_relative_path(str(saved["relative_path"])))
+                    target = safe_join(destination, relative_path)
+                    size = int(saved["size"])
+                    sha256 = str(saved["sha256"])
+                    completed = (
+                        target.is_file() and target.stat().st_size == size
+                        and _sha256(target) == sha256
+                    )
+                    part_path = target.with_name(f".{target.name}.{item_id}.part")
+                    digest = hashlib.sha256()
+                    received = 0
+                    if not completed and part_path.is_file():
+                        checkpoint = int(saved.get("received_bytes", 0))
+                        received = min(part_path.stat().st_size, checkpoint)
+                        if received < 0 or received > size:
+                            raise ValueError("invalid saved partial-file checkpoint")
+                        with part_path.open("r+b") as source:
+                            source.truncate(received)
+                        with part_path.open("rb") as source:
+                            for chunk in iter(lambda: source.read(CHUNK_SIZE), b""):
+                                digest.update(chunk)
+                    items.append(IncomingItem(
+                        id=item_id, relative_path=relative_path, size=size,
+                        sha256=sha256, target=target, completed=completed,
+                        received_bytes=size if completed else received, digest=digest,
+                    ))
+                incoming_transfer = IncomingTransfer(
+                    id=str(record["id"]), batch_name=str(record["batch_name"]),
+                    source=DeviceMessage.model_validate(record["source"]),
+                    destination=destination, items=items,
+                    status="complete" if all(item.completed for item in items) else "waiting",
+                    created_at=float(record["created_at"]),
+                )
+                self._incoming[incoming_transfer.id] = incoming_transfer
+        except (OSError, ValueError, KeyError, TypeError) as error:
+            print(f"Relay could not restore transfer state: {error}")
 
 
 def _sha256(path: Path) -> str:

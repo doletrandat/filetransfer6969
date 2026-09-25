@@ -4,6 +4,7 @@ import asyncio
 import socket
 import threading
 import time
+from dataclasses import replace
 from pathlib import Path
 from typing import Any, cast
 
@@ -88,6 +89,30 @@ def test_pinned_tls_pairing_and_transfer(tmp_path: Path) -> None:
 
         assert (Path(received.destination) / "folder" / "message.txt").read_bytes() == content
         assert manager.list_outgoing()[0].status == "complete"
+
+        second_content = b"resume after sender restart"
+        second_staged = asyncio.run(
+            manager.stage("folder/second.txt", stream_bytes(second_content))
+        )
+        pending = manager.start_outgoing(peer.id, "second batch", [second_staged.id])
+        new_ticket = receiver_context.pairing.create_ticket()
+        restored = TransferManager(
+            data_dir,
+            SettingsStore(data_dir),
+            DeviceIdentity(id="sender", name="Sender", fingerprint="A" * 64),
+            cast(DiscoveryManager, FixedDiscovery(
+                replace(device, code_hash=hash_code(new_ticket.code))
+            )),
+        )
+        assert restored.list_outgoing()[0].status == "failed"
+        assert restored.list_staged()[0].id == second_staged.id
+        restored.pair(new_ticket.code)
+        restored.retry_outgoing(pending.id)
+        second_received = receiver_app.state.context.transfers.incoming_status(pending.id)
+        assert (
+            Path(second_received.destination) / "folder" / "second.txt"
+        ).read_bytes() == second_content
+        assert restored.list_outgoing()[0].status == "complete"
     finally:
         receiver_server.should_exit = True
         thread.join(timeout=10)
