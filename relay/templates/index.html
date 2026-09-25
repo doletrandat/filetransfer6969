@@ -3,52 +3,114 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="theme-color" content="#edf3f4">
+  <meta name="theme-color" content="#f5f8ff">
   <meta name="relay-control-token" content="{{ control_token }}">
-  <title>Relay — Gửi nhận tệp trong mạng nội bộ</title>
+  <title>Relay — Chia sẻ tệp trong mạng nội bộ</title>
   <link rel="stylesheet" href="/static/styles.css">
   <script src="/static/app.js" defer></script>
 </head>
 <body>
-  <header class="masthead">
-    <a class="brand" href="/" aria-label="Relay, trang chủ"><span class="brand-mark" aria-hidden="true">↗</span><span>Relay</span></a>
-    <div class="machine-stamp"><span>Máy tính này</span><strong id="deviceName">Đang khởi động…</strong><small id="deviceAddress">Mạng nội bộ</small></div>
-  </header>
-  <main>
-    <section class="intro" aria-labelledby="pageTitle">
-      <div><p class="eyebrow">CHIA SẺ TRONG MẠNG NỘI BỘ</p><h1 id="pageTitle">Gửi và nhận tệp<br>thật đơn giản.</h1><p>Chọn cách kết nối bên dưới. Điện thoại và máy tính cần dùng chung Wi-Fi.</p></div>
-      <div class="intro-note"><span class="note-dot"></span><span>Tệp đi trực tiếp giữa các thiết bị trong mạng của bạn.</span></div>
-    </section>
-    <section class="receipt" aria-labelledby="receiptTitle">
-      <div class="section-heading"><div><p class="eyebrow">HỘP THƯ ĐẾN</p><h2 id="receiptTitle">Tệp từ điện thoại</h2><p>Ảnh và tệp gửi từ điện thoại sẽ xuất hiện ở đây.</p></div><div class="receipt-actions"><span class="count-badge" id="phoneUploadCount">0 tệp</span><button class="text-button" id="enableNotificationsButton" type="button">Bật thông báo trên máy tính</button></div></div>
-      <div id="latestPhoneUpload" class="latest-upload" hidden><span class="received-icon" aria-hidden="true">✓</span><div><strong id="latestPhoneName"></strong><span id="latestPhoneDetail"></span><code id="latestPhonePath"></code></div><button class="button secondary" id="copyPhonePathButton" type="button">Sao chép đường dẫn</button></div>
-      <div id="phoneUploadsList" class="phone-upload-list" aria-live="polite"><p class="empty-message">Chưa nhận tệp nào từ điện thoại.</p></div>
-    </section>
-    <div class="connect-grid">
-      <section class="connect-card phone-card" aria-labelledby="phoneTitle">
-        <p class="eyebrow">CÁCH 1 · ĐIỆN THOẠI</p><h2 id="phoneTitle">Quét mã để kết nối</h2>
-        <p>Dùng camera điện thoại quét mã QR. Sau đó chọn ảnh hoặc tệp để gửi đến máy tính này.</p>
-        <button class="button primary" id="phoneConnectButton" type="button">Tạo mã QR cho điện thoại</button>
-        <div class="phone-invite" id="phoneInvite" hidden><img id="phoneInviteQr" alt="Mã QR kết nối điện thoại" width="164" height="164"><div><strong>Quét bằng camera điện thoại</strong><p>Liên kết chỉ dùng một lần và hết hạn sau 10 phút.</p><a id="phoneInviteLink" href="#" rel="noreferrer"></a><button class="text-button" id="phoneDisconnectButton" type="button">Ngắt kết nối điện thoại</button></div></div>
-      </section>
-      <section class="connect-card computer-card" aria-labelledby="computerTitle">
-        <div class="computer-heading"><div><p class="eyebrow">CÁCH 2 · MÁY TÍNH KHÁC</p><h2 id="computerTitle">Kết nối máy tính</h2></div><div class="discovery-state" role="status"><span class="signal-lamp" id="discoveryLamp"></span><span id="discoveryText">Đang tìm</span></div></div>
-        <p>Chọn máy bên dưới rồi nhập mã ghép nối hiển thị trên máy đó.</p>
-        <div id="deviceList" class="device-list" role="list" aria-live="polite"><p class="empty-message">Đang tìm máy tính trong cùng mạng…</p></div>
-        <form id="pairForm" class="code-form"><label for="pairingCode">Mã ghép nối 8 ký tự</label><div class="code-entry"><input id="pairingCode" name="code" autocomplete="one-time-code" maxlength="8" spellcheck="false" placeholder="ABCD2345" required><button class="button secondary" type="submit">Kết nối</button></div><p class="field-message" id="pairMessage" role="status">Nhập mã trên máy tính muốn kết nối.</p></form>
-        <button class="text-button" id="createCodeButton" type="button">Tạo mã để máy khác kết nối vào đây</button>
-        <div class="pairing-ticket" id="pairingTicket" hidden><img id="pairingQr" src="/static/relay-mark.svg" alt="Mã QR ghép nối" width="136" height="136"><div><span class="eyebrow">MÃ DÙNG MỘT LẦN</span><strong class="ticket-code" id="ticketCode"></strong><p id="ticketCountdown"></p><button class="text-button" id="newCodeButton" type="button">Tạo mã mới</button></div></div>
-        <button class="text-button" id="scanCodeButton" type="button">Quét mã QR ghép nối</button>
-        <div class="scan-panel" id="scanPanel" hidden><video id="scanVideo" autoplay playsinline muted aria-label="Máy quét QR"></video><p id="scanMessage" role="status"></p><button class="button secondary" id="closeScannerButton" type="button">Đóng camera</button></div>
-      </section>
+  <div class="app-shell">
+    <aside class="sidebar" aria-label="Điều hướng">
+      <a class="brand" href="/" aria-label="Relay, trang chủ"><span class="brand-mark" aria-hidden="true">↗</span><span>Relay</span></a>
+      <nav class="view-nav" aria-label="Các màn hình">
+        <button class="nav-button is-active" type="button" data-view="receive" aria-current="page"><span class="nav-icon" aria-hidden="true">↓</span>Nhận</button>
+        <button class="nav-button" type="button" data-view="send"><span class="nav-icon" aria-hidden="true">↑</span>Gửi</button>
+        <button class="nav-button" type="button" data-view="activity"><span class="nav-icon" aria-hidden="true">◷</span>Lịch sử</button>
+      </nav>
+      <p class="sidebar-note">Các thiết bị cần dùng chung mạng Wi-Fi.</p>
+    </aside>
+
+    <div class="workspace">
+      <header class="topbar">
+        <span class="topbar-title">Chia sẻ trong mạng nội bộ</span>
+        <span class="connection-pill"><span class="signal-lamp" aria-hidden="true"></span>Máy tính này đang hoạt động</span>
+      </header>
+
+      <main>
+        <section class="view" id="receiveView" aria-labelledby="receiveTitle">
+          <div class="receive-hero">
+            <div class="receive-symbol" aria-hidden="true"><span>↓</span></div>
+            <p class="status-line"><span class="status-dot" aria-hidden="true"></span>Sẵn sàng nhận tệp</p>
+            <h1 id="receiveTitle">Máy tính này</h1>
+            <strong class="hero-device" id="deviceName">Đang khởi động…</strong>
+            <p>Chọn máy này trên thiết bị muốn gửi, hoặc quét mã QR để kết nối điện thoại.</p>
+            <span class="address-chip" id="deviceAddress">Mạng nội bộ</span>
+          </div>
+
+          <div class="quick-grid">
+            <section class="surface quick-card" aria-labelledby="phoneTitle">
+              <div class="quick-icon" aria-hidden="true">▣</div>
+              <div class="quick-body">
+                <h2 id="phoneTitle">Kết nối điện thoại</h2>
+                <p>Quét mã QR để gửi ảnh lên máy tính hoặc tải tệp về điện thoại.</p>
+                <button class="button primary" id="phoneConnectButton" type="button">Hiện mã QR</button>
+              </div>
+              <div class="phone-invite" id="phoneInvite" hidden>
+                <img id="phoneInviteQr" alt="Mã QR kết nối điện thoại" width="164" height="164">
+                <div><strong>Quét bằng camera điện thoại</strong><p>Liên kết dùng một lần, hết hạn sau 10 phút.</p><a id="phoneInviteLink" href="#" rel="noreferrer"></a><button class="text-button" id="phoneDisconnectButton" type="button">Ngắt kết nối</button></div>
+              </div>
+            </section>
+
+            <section class="surface quick-card" aria-labelledby="pairTitle">
+              <div class="quick-icon" aria-hidden="true">⌗</div>
+              <div class="quick-body">
+                <h2 id="pairTitle">Nhận từ máy tính khác</h2>
+                <p>Tạo mã ghép nối và nhập mã đó trên máy gửi.</p>
+                <button class="button secondary" id="createCodeButton" type="button">Tạo mã ghép nối</button>
+              </div>
+              <div class="pairing-ticket" id="pairingTicket" hidden>
+                <img id="pairingQr" src="/static/relay-mark.svg" alt="Mã QR ghép nối" width="136" height="136">
+                <div><span>Mã dùng một lần</span><strong class="ticket-code" id="ticketCode"></strong><p id="ticketCountdown"></p><button class="text-button" id="newCodeButton" type="button">Tạo mã mới</button></div>
+              </div>
+            </section>
+          </div>
+
+          <section class="surface received-section" aria-labelledby="receiptTitle">
+            <div class="section-heading">
+              <div><h2 id="receiptTitle">Tệp từ điện thoại</h2><p>Tệp nhận gần đây sẽ xuất hiện ở đây.</p></div>
+              <div class="receipt-actions"><span class="count-badge" id="phoneUploadCount">0 tệp</span><button class="text-button" id="enableNotificationsButton" type="button">Bật thông báo</button></div>
+            </div>
+            <div id="latestPhoneUpload" class="latest-upload" hidden><span class="received-icon" aria-hidden="true">✓</span><div><strong id="latestPhoneName"></strong><span id="latestPhoneDetail"></span><code id="latestPhonePath"></code></div><button class="button secondary" id="copyPhonePathButton" type="button">Sao chép đường dẫn</button></div>
+            <div id="phoneUploadsList" class="phone-upload-list" aria-live="polite"><p class="empty-message">Chưa nhận tệp nào từ điện thoại.</p></div>
+          </section>
+        </section>
+
+        <section class="view" id="sendView" aria-labelledby="sendTitle" hidden>
+          <div class="view-heading"><h1 id="sendTitle">Gửi tệp</h1><p>Chọn tệp, rồi chọn máy nhận ở gần bạn.</p></div>
+          <section class="surface send-panel" aria-label="Chọn tệp để gửi">
+            <div class="drop-zone" id="dropZone" aria-label="Khu vực kéo thả tệp">
+              <span class="drop-symbol" aria-hidden="true">＋</span>
+              <div class="drop-copy"><strong>Chọn tệp để gửi</strong><span>Hoặc kéo thả tệp vào đây</span></div>
+              <div class="file-actions"><input id="fileInput" type="file" multiple hidden><input id="folderInput" type="file" webkitdirectory directory multiple hidden><button class="button primary" id="chooseFilesButton" type="button">Chọn tệp</button><button class="button secondary" id="chooseFolderButton" type="button">Chọn thư mục</button></div>
+            </div>
+            <div class="queue-heading"><div><h2>Tệp đã chọn</h2><span id="queueSummary">Chưa chọn tệp</span></div><button class="text-button" id="clearStagedButton" type="button" disabled>Xóa danh sách</button></div>
+            <div class="file-queue" id="stagedList" aria-live="polite"><p class="empty-message">Tệp đã chọn sẽ hiển thị tại đây.</p></div>
+          </section>
+
+          <section class="surface devices-section" aria-labelledby="computerTitle">
+            <div class="section-heading"><div><h2 id="computerTitle">Thiết bị gần đây</h2><p id="transferSubtitle">Chọn máy tính đã kết nối để gửi tệp.</p></div><div class="discovery-state" role="status"><span class="signal-lamp" id="discoveryLamp"></span><span id="discoveryText">Đang tìm</span></div></div>
+            <div id="deviceList" class="device-list" aria-live="polite"><p class="empty-message">Đang tìm máy tính trong cùng mạng…</p></div>
+            <details class="pairing-options" id="pairingOptions"><summary>Kết nối bằng mã hoặc mã QR</summary>
+              <form id="pairForm" class="code-form"><label for="pairingCode">Mã ghép nối 8 ký tự</label><div class="code-entry"><input id="pairingCode" name="code" autocomplete="one-time-code" maxlength="8" spellcheck="false" placeholder="ABCD2345" required><button class="button secondary" type="submit">Kết nối</button></div><p class="field-message" id="pairMessage" role="status">Nhập mã trên máy tính muốn kết nối.</p></form>
+              <button class="text-button" id="scanCodeButton" type="button">Quét mã QR ghép nối</button>
+              <div class="scan-panel" id="scanPanel" hidden><video id="scanVideo" autoplay playsinline muted aria-label="Máy quét QR"></video><p id="scanMessage" role="status"></p><button class="button secondary" id="closeScannerButton" type="button">Đóng camera</button></div>
+            </details>
+            <div class="send-footer"><div class="target-stamp" id="targetStamp"><span>Máy nhận</span><strong>Chưa chọn</strong></div><button class="button send-button" id="sendButton" type="button" disabled><span>Chọn máy tính nhận</span><span aria-hidden="true">↑</span></button></div>
+          </section>
+        </section>
+
+        <section class="view" id="activityView" aria-labelledby="activityTitle" hidden>
+          <div class="view-heading"><h1 id="activityTitle">Lịch sử</h1><p>Theo dõi các lượt gửi và nhận giữa máy tính.</p></div>
+          <section class="surface activity">
+            <div class="section-heading"><h2>Truyền tệp</h2><details class="settings-control"><summary>Thư mục lưu tệp nhận</summary><form id="settingsForm"><label for="destinationInput">Đường dẫn trên máy này</label><div><input id="destinationInput" name="destination" required><button class="button secondary" type="submit">Lưu</button></div><p class="field-message" id="settingsMessage" role="status"></p></form></details></div>
+            <div class="transfer-columns"><div><h3>Đã gửi</h3><div id="outgoingList" class="transfer-list" aria-live="polite"><p class="empty-message">Chưa gửi tệp nào.</p></div></div><div><h3>Đã nhận</h3><div id="incomingList" class="transfer-list" aria-live="polite"><p class="empty-message">Chưa nhận tệp nào.</p></div></div></div>
+          </section>
+          <p class="fingerprint">Mã nhận dạng máy này: <code id="fingerprint">Đang tải</code></p>
+        </section>
+      </main>
     </div>
-    <section class="send-panel" aria-labelledby="sendTitle"><div class="section-heading"><div><p class="eyebrow">GỬI TỪ MÁY TÍNH</p><h2 id="sendTitle">Chọn tệp để chia sẻ</h2><p id="transferSubtitle">Chọn máy tính đã kết nối để gửi. Nếu gửi cho điện thoại, tệp được chọn sẽ hiện trên điện thoại để tải về.</p></div><div class="target-stamp" id="targetStamp"><span>Máy nhận</span><strong>Chưa chọn</strong></div></div>
-      <div class="drop-zone" id="dropZone" aria-label="Khu vực kéo thả tệp"><span class="drop-symbol" aria-hidden="true">＋</span><div><strong>Kéo tệp vào đây</strong><span>Hoặc chọn tệp, chọn cả thư mục bên dưới.</span></div><div class="file-actions"><input id="fileInput" type="file" multiple hidden><input id="folderInput" type="file" webkitdirectory directory multiple hidden><button class="button primary" id="chooseFilesButton" type="button">Chọn tệp</button><button class="button secondary" id="chooseFolderButton" type="button">Chọn thư mục</button></div></div>
-      <div class="queue-heading"><div><h3>Tệp đã chọn</h3><span id="queueSummary">Chưa chọn tệp</span></div><button class="text-button" id="clearStagedButton" type="button" disabled>Xóa danh sách</button></div><div class="file-queue" id="stagedList" aria-live="polite"><p class="empty-message">Tệp đã chọn sẽ hiển thị tại đây.</p></div><button class="button send-button" id="sendButton" type="button" disabled><span>Chọn máy tính nhận</span><span aria-hidden="true">→</span></button>
-    </section>
-    <section class="activity" aria-labelledby="activityTitle"><div class="section-heading"><div><p class="eyebrow">LỊCH SỬ TRUYỀN TỆP</p><h2 id="activityTitle">Giữa các máy tính</h2></div><details class="settings-control"><summary>Thư mục lưu tệp nhận</summary><form id="settingsForm"><label for="destinationInput">Đường dẫn trên máy này</label><div><input id="destinationInput" name="destination" required><button class="button secondary" type="submit">Lưu</button></div><p class="field-message" id="settingsMessage" role="status"></p></form></details></div><div class="transfer-columns"><div><h3>Đã gửi</h3><div id="outgoingList" class="transfer-list" aria-live="polite"><p class="empty-message">Chưa gửi tệp nào.</p></div></div><div><h3>Đã nhận</h3><div id="incomingList" class="transfer-list" aria-live="polite"><p class="empty-message">Chưa nhận tệp nào.</p></div></div></div></section>
-  </main>
+  </div>
   <div class="toast" id="toast" role="alert" hidden></div>
-  <footer><span>Relay · Chia sẻ tệp trong mạng nội bộ</span><span>Mã nhận dạng: <code id="fingerprint">Đang tải</code></span></footer>
 </body>
 </html>

@@ -17,11 +17,18 @@ const state = {
 const controlToken = document.querySelector('meta[name="relay-control-token"]').content;
 
 const elements = {
+  viewButtons: document.querySelectorAll("[data-view]"),
+  views: {
+    receive: document.querySelector("#receiveView"),
+    send: document.querySelector("#sendView"),
+    activity: document.querySelector("#activityView"),
+  },
   deviceName: document.querySelector("#deviceName"),
   deviceAddress: document.querySelector("#deviceAddress"),
   discoveryText: document.querySelector("#discoveryText"),
   discoveryLamp: document.querySelector("#discoveryLamp"),
   deviceList: document.querySelector("#deviceList"),
+  pairingOptions: document.querySelector("#pairingOptions"),
   pairForm: document.querySelector("#pairForm"),
   pairingCode: document.querySelector("#pairingCode"),
   pairMessage: document.querySelector("#pairMessage"),
@@ -68,6 +75,17 @@ const elements = {
   fingerprint: document.querySelector("#fingerprint"),
   toast: document.querySelector("#toast"),
 };
+
+function showView(name) {
+  const view = elements.views[name] ? name : "receive";
+  for (const [key, panel] of Object.entries(elements.views)) panel.hidden = key !== view;
+  elements.viewButtons.forEach((button) => {
+    const active = button.dataset.view === view;
+    button.classList.toggle("is-active", active);
+    if (active) button.setAttribute("aria-current", "page");
+    else button.removeAttribute("aria-current");
+  });
+}
 
 async function api(path, options = {}) {
   const { timeoutMs = 8000, ...fetchOptions } = options;
@@ -163,7 +181,7 @@ function renderStatus() {
   if (!state.status) return;
   const { device, addresses, destination } = state.status;
   elements.deviceName.textContent = device.name;
-  elements.deviceAddress.textContent = addresses.find((address) => !address.startsWith("127.")) || "This device";
+  elements.deviceAddress.textContent = addresses.find((address) => !address.startsWith("127.")) || "Máy này";
   elements.fingerprint.textContent = device.fingerprint;
   if (document.activeElement !== elements.destinationInput) elements.destinationInput.value = destination;
   const hasDevices = state.devices.length > 0;
@@ -182,7 +200,7 @@ function renderDevices() {
     const connected = pairedIds.has(device.id);
     const selected = state.selectedPeerId === device.id;
     return `
-      <button class="device-row${selected ? " selected" : ""}" role="listitem" data-device-id="${escapeHtml(device.id)}">
+      <button class="device-row${selected ? " selected" : ""}" data-device-id="${escapeHtml(device.id)}">
         <span class="device-lamp" aria-hidden="true"></span>
         <span>
           <span class="device-name">${escapeHtml(device.name)}</span>
@@ -288,7 +306,7 @@ function renderPhoneUploads() {
   }
   elements.phoneUploadsList.innerHTML = items.length
     ? items.slice(1, 8).map((item) => `<div class="phone-upload-row"><div><strong>${escapeHtml(item.name)}</strong><span>${escapeHtml(item.folder)} · ${formatBytes(item.size)}</span></div><span>${new Date(item.received_at * 1000).toLocaleString("vi-VN")}</span></div>`).join("")
-    : `<p class="empty-message">Chưa nhận tệp nào từ điện thoại. Tạo mã QR bên dưới để bắt đầu.</p>`;
+    : `<p class="empty-message">Chưa nhận tệp nào từ điện thoại. Chọn “Hiện mã QR” ở trên để bắt đầu.</p>`;
 }
 
 function renderTicket() {
@@ -334,7 +352,8 @@ async function refresh() {
     const previousIds = new Set(state.phoneUploads.map((item) => item.id));
     const newUploads = (payload.phone_uploads || []).filter((item) => !previousIds.has(item.id));
     state.phoneUploads = payload.phone_uploads || [];
-    if (state.selectedPeerId && !state.peers.some((peer) => peer.id === state.selectedPeerId)) {
+    if (state.selectedPeerId && !state.peers.some((peer) => peer.id === state.selectedPeerId)
+      && !state.devices.some((device) => device.id === state.selectedPeerId)) {
       state.selectedPeerId = null;
     }
     if (!state.selectedPeerId && state.peers.length) state.selectedPeerId = state.peers[0].id;
@@ -558,9 +577,14 @@ elements.deviceList.addEventListener("click", (event) => {
   state.selectedPeerId = deviceId;
   if (!paired) {
     setPairMessage(`Nhập mã hiển thị trên ${row.querySelector(".device-name").textContent}.`);
+    elements.pairingOptions.open = true;
     elements.pairingCode.focus();
   }
   renderAll();
+});
+
+elements.viewButtons.forEach((button) => {
+  button.addEventListener("click", () => showView(button.dataset.view));
 });
 
 elements.stagedList.addEventListener("click", async (event) => {
@@ -681,4 +705,5 @@ document.addEventListener("visibilitychange", () => {
 window.addEventListener("online", pollState);
 window.setInterval(renderTicket, 1000);
 updateNotificationButton();
+showView("receive");
 pollState();

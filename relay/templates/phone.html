@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="theme-color" content="#e6ecee">
+  <meta name="theme-color" content="#f5f8ff">
   <meta name="relay-phone-token" content="{{ phone_token }}">
   <title>Relay — Điện thoại</title>
   <link rel="stylesheet" href="/static/phone.css">
@@ -11,36 +11,31 @@
 </head>
 <body>
   <header class="phone-header">
-    <div class="brand">Relay <span>ĐIỆN THOẠI</span></div>
-    <div class="device-label">Đã kết nối với <strong>{{ device_name }}</strong></div>
+    <div class="brand"><span class="brand-mark" aria-hidden="true">↗</span>Relay</div>
+    <div class="device-label"><span class="status-dot" aria-hidden="true"></span>Đã kết nối với <strong>{{ device_name }}</strong></div>
   </header>
 
   <main>
-    <section class="intro">
-      <p class="eyebrow">CHIA SẺ TRONG CÙNG WI-FI</p>
-      <h1>Gửi ảnh, nhận tệp dễ dàng.</h1>
-      <p>Giữ Relay mở trên máy tính trong lúc gửi hoặc tải tệp.</p>
-    </section>
+    <div class="intro"><h1>Chia sẻ tệp</h1><p>Gửi và nhận với {{ device_name }} qua mạng Wi-Fi.</p></div>
+    <nav class="phone-nav" aria-label="Chọn thao tác">
+      <button class="phone-tab is-active" type="button" data-phone-view="send" aria-current="page">↑ Gửi lên máy tính</button>
+      <button class="phone-tab" type="button" data-phone-view="receive">↓ Tải về điện thoại</button>
+    </nav>
 
-    <section class="card" aria-labelledby="sendTitle">
-      <div class="section-number">GỬI ĐẾN MÁY TÍNH</div>
-      <h2 id="sendTitle">Chọn ảnh hoặc tệp</h2>
-      <p>Relay sẽ lưu vào thư mục <strong>From phone</strong> trong thư mục nhận của máy tính.</p>
+    <section class="card phone-view" id="phoneSendView" aria-labelledby="sendTitle">
+      <h2 id="sendTitle">Gửi tệp</h2>
+      <p>Chọn ảnh hoặc tệp từ điện thoại.</p>
       <label for="phoneFiles">Tệp muốn gửi</label>
       <input id="phoneFiles" type="file" multiple>
       <p class="selection" id="selection" role="status">Chưa chọn tệp.</p>
       <button class="primary" id="uploadButton" type="button" disabled>Gửi đến máy tính</button>
       <progress id="uploadProgress" max="100" value="0" hidden></progress>
       <p class="feedback" id="uploadStatus" role="status" aria-live="polite"></p>
-      <h3>Tệp đã gửi trong lần kết nối này</h3>
-      <ul class="uploaded-list" id="uploadedList"></ul>
+      <details class="history-disclosure"><summary>Tệp đã gửi trong lần kết nối này</summary><ul class="uploaded-list" id="uploadedList"></ul></details>
     </section>
 
-    <section class="card" aria-labelledby="receiveTitle">
-      <div class="section-number">NHẬN TỪ MÁY TÍNH</div>
-      <h2 id="receiveTitle">Tải tệp về điện thoại</h2>
-      <p>Trên máy tính, bấm <strong>Chọn tệp</strong>. Tệp sẽ hiện ở đây để tải xuống.</p>
-      <button class="secondary" id="refreshButton" type="button">Làm mới danh sách</button>
+    <section class="card phone-view" id="phoneReceiveView" aria-labelledby="receiveTitle" hidden>
+      <div class="receive-heading"><div><h2 id="receiveTitle">Tải tệp về</h2><p>Chọn tệp trên máy tính để chúng xuất hiện ở đây.</p></div><button class="secondary" id="refreshButton" type="button">Làm mới</button></div>
       <ul class="download-list" id="downloadList"><li>Chưa có tệp để tải.</li></ul>
     </section>
 

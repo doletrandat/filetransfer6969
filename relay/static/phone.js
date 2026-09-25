@@ -1,5 +1,10 @@
 const phoneToken = document.querySelector('meta[name="relay-phone-token"]').content;
 const elements = {
+  viewButtons: document.querySelectorAll("[data-phone-view]"),
+  views: {
+    send: document.querySelector("#phoneSendView"),
+    receive: document.querySelector("#phoneReceiveView"),
+  },
   files: document.querySelector("#phoneFiles"),
   selection: document.querySelector("#selection"),
   uploadButton: document.querySelector("#uploadButton"),
@@ -10,6 +15,17 @@ const elements = {
   downloadList: document.querySelector("#downloadList"),
   connectionStatus: document.querySelector("#connectionStatus"),
 };
+
+function showView(name) {
+  const view = elements.views[name] ? name : "send";
+  for (const [key, panel] of Object.entries(elements.views)) panel.hidden = key !== view;
+  elements.viewButtons.forEach((button) => {
+    const active = button.dataset.phoneView === view;
+    button.classList.toggle("is-active", active);
+    if (active) button.setAttribute("aria-current", "page");
+    else button.removeAttribute("aria-current");
+  });
+}
 
 function formatBytes(value) {
   const units = ["B", "KB", "MB", "GB", "TB"];
@@ -139,6 +155,10 @@ elements.uploadButton.addEventListener("click", async () => {
 });
 
 elements.refreshButton.addEventListener("click", refresh);
+elements.viewButtons.forEach((button) => {
+  button.addEventListener("click", () => showView(button.dataset.phoneView));
+});
 document.addEventListener("visibilitychange", () => { if (!document.hidden) refresh(); });
 setInterval(() => { if (!document.hidden) refresh(); }, 5000);
+showView("send");
 refresh();

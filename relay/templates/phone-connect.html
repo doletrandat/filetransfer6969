@@ -3,28 +3,21 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="theme-color" content="#e6ecee">
+  <meta name="theme-color" content="#f5f8ff">
   <title>Relay — Kết nối điện thoại</title>
   <link rel="stylesheet" href="/static/phone.css">
 </head>
 <body>
-  <header class="phone-header">
-    <div class="brand">Relay <span>ĐIỆN THOẠI</span></div>
-  </header>
-  <main>
-    <section class="intro">
-      <p class="eyebrow">KẾT NỐI DÙNG MỘT LẦN</p>
-      <h1>Kết nối với {{ device_name }}</h1>
-      <p>Kiểm tra đây là máy tính của bạn và hai thiết bị dùng chung mạng Wi-Fi.</p>
-    </section>
-    <section class="card">
-      <h2>Sẵn sàng gửi và nhận tệp?</h2>
-      <p>Bạn có thể gửi ảnh lên máy tính và tải tệp về điện thoại. Kết nối hết hạn sau một giờ hoặc khi ngắt trên máy tính.</p>
-      <form action="/phone/connect" method="post">
-        <input type="hidden" name="invite" value="{{ invite }}">
-        <button class="primary" type="submit">Kết nối với Relay</button>
-      </form>
-    </section>
+  <header class="phone-header"><div class="brand"><span class="brand-mark" aria-hidden="true">↗</span>Relay</div></header>
+  <main class="connect-page">
+    <div class="connect-symbol" aria-hidden="true">↕</div>
+    <h1>Kết nối với {{ device_name }}</h1>
+    <p>Kiểm tra đây là máy tính của bạn và hai thiết bị dùng chung Wi-Fi.</p>
+    <form class="card connect-card" action="/phone/connect" method="post">
+      <input type="hidden" name="invite" value="{{ invite }}">
+      <button class="primary" type="submit">Kết nối với Relay</button>
+      <span>Bạn có thể gửi ảnh lên máy tính và tải tệp về điện thoại. Kết nối hết hạn sau một giờ.</span>
+    </form>
   </main>
 </body>
 </html>
