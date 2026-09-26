@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import io
 import ipaddress
+import os
 import secrets
 import socket
 from pathlib import Path
@@ -29,6 +30,50 @@ from relay.security import AuthorizedPeer, PairingError, PairingRegistry, Sessio
 from relay.transfers import TransferError, TransferManager
 
 PACKAGE_DIR = Path(__file__).resolve().parent
+PREVIEW_MEDIA_TYPES = {
+    ".png": "image/png",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".gif": "image/gif",
+    ".webp": "image/webp",
+    ".bmp": "image/bmp",
+    ".pdf": "application/pdf",
+    ".mp3": "audio/mpeg",
+    ".ogg": "audio/ogg",
+    ".mp4": "video/mp4",
+    ".webm": "video/webm",
+}
+TEXT_PREVIEW_SUFFIXES = {
+    ".txt", ".log", ".md", ".csv", ".json", ".html", ".htm", ".svg",
+    ".xml", ".py", ".js", ".css", ".yaml", ".yml",
+}
+
+
+def received_file_response(
+    path: Path, filename: str | None = None, *, download: bool = False
+) -> FileResponse:
+    name = filename or path.name
+    suffix = Path(name).suffix.lower()
+    media_type = PREVIEW_MEDIA_TYPES.get(suffix)
+    content_security_policy = (
+        "default-src 'none'; img-src 'self' data: blob:; media-src 'self' blob:"
+        if media_type else "sandbox; default-src 'none'"
+    )
+    if suffix in TEXT_PREVIEW_SUFFIXES:
+        media_type = "text/plain; charset=utf-8"
+    return FileResponse(
+        path,
+        filename=name,
+        media_type=media_type or "application/octet-stream",
+        content_disposition_type="inline" if media_type and not download else "attachment",
+        headers={"Content-Security-Policy": content_security_policy},
+    )
+
+
+def open_with_default_app(path: Path) -> None:
+    if os.name != "nt":
+        raise OSError("Opening received files is supported on Windows only.")
+    os.startfile(str(path))
 
 
 class CodeRequest(BaseModel):
@@ -89,6 +134,10 @@ def create_app(context: AppContext) -> FastAPI:
     app = FastAPI(title="Relay", version="0.1.0", docs_url=None, redoc_url=None)
     app.state.context = context
     templates = Jinja2Templates(directory=str(PACKAGE_DIR / "templates"))
+    static_version = str(max(
+        (PACKAGE_DIR / "static" / name).stat().st_mtime_ns
+        for name in ("app.js", "styles.css", "phone.js", "phone.css")
+    ))
 
     def require_session(authorization: Annotated[str | None, Header()] = None) -> AuthorizedPeer:
         if not authorization or not authorization.startswith("Bearer "):
@@ -132,10 +181,10 @@ def create_app(context: AppContext) -> FastAPI:
                 if not secrets.compare_digest(supplied, context.control_token):
                     return Response(status_code=403)
         response = await call_next(request)
-        response.headers["Content-Security-Policy"] = (
+        response.headers.setdefault("Content-Security-Policy", (
             "default-src 'self'; img-src 'self' data:; style-src 'self'; script-src 'self'; "
             "connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'"
-        )
+        ))
         response.headers["Referrer-Policy"] = "no-referrer"
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["X-Frame-Options"] = "DENY"
@@ -146,7 +195,8 @@ def create_app(context: AppContext) -> FastAPI:
     @app.get("/", response_class=HTMLResponse)
     def index(request: Request) -> Any:
         return templates.TemplateResponse(
-            request=request, name="index.html", context={"control_token": context.control_token}
+            request=request, name="index.html",
+            context={"control_token": context.control_token, "static_version": static_version},
         )
 
     @app.post("/api/v1/phone/invite")
@@ -181,13 +231,15 @@ def create_app(context: AppContext) -> FastAPI:
             return templates.TemplateResponse(
                 request=request,
                 name="phone-connect.html",
-                context={"invite": invite, "device_name": context.identity.name},
+                context={"invite": invite, "device_name": context.identity.name,
+                         "static_version": static_version},
             )
         session = require_phone(request)
         return templates.TemplateResponse(
             request=request,
             name="phone.html",
-            context={"phone_token": session.csrf_token, "device_name": context.identity.name},
+            context={"phone_token": session.csrf_token, "device_name": context.identity.name,
+                     "static_version": static_version},
         )
 
     @app.post("/phone/connect")
@@ -245,7 +297,7 @@ def create_app(context: AppContext) -> FastAPI:
 
     @app.get("/phone/api/files/{item_id}", response_class=FileResponse)
     def phone_download(
-        item_id: str, session: PhoneSession = Depends(require_phone)
+        item_id: str, session: PhoneSession = Depends(require_phone), preview: bool = False
     ) -> FileResponse:
         item = next(
             (candidate for candidate in context.transfers.list_staged() if candidate.id == item_id),
@@ -253,6 +305,8 @@ def create_app(context: AppContext) -> FastAPI:
         )
         if item is None or not item.path.is_file():
             raise HTTPException(status_code=404, detail="This file is no longer available.")
+        if preview:
+            return received_file_response(item.path, Path(item.relative_path).name)
         return FileResponse(item.path, filename=Path(item.relative_path).name)
 
     @app.get("/api/v1/status")
@@ -332,7 +386,121 @@ def create_app(context: AppContext) -> FastAPI:
             "outgoing": outgoing_transfers(),
             "incoming": incoming_transfers(),
             "phone_uploads": context.phone.recent_uploads(),
+            "phone_connection": context.phone.connection_state(),
         }
+
+    def phone_upload_path(upload_id: str) -> Path:
+        upload = next(
+            (item for item in context.phone.recent_uploads() if item["id"] == upload_id),
+            None,
+        )
+        if upload is None:
+            raise HTTPException(status_code=404, detail="This file is no longer available.")
+        path = Path(str(upload["path"]))
+        if path.is_symlink() or not path.is_file():
+            raise HTTPException(status_code=404, detail="This file is no longer available.")
+        return path
+
+    def computer_upload_path(transfer_id: str, item_id: str) -> Path:
+        try:
+            transfer = context.transfers.incoming_status(transfer_id)
+        except TransferError as error:
+            raise HTTPException(
+                status_code=404, detail="This file is no longer available."
+            ) from error
+        item = next((candidate for candidate in transfer.items if candidate.id == item_id), None)
+        if item is None or not item.completed:
+            raise HTTPException(status_code=404, detail="This file is no longer available.")
+        path = item.target
+        if (
+            path.is_symlink()
+            or not path.is_file()
+            or not path.resolve().is_relative_to(transfer.destination.resolve())
+        ):
+            raise HTTPException(status_code=404, detail="This file is no longer available.")
+        return path
+
+    def open_received_file(path: Path) -> dict[str, bool]:
+        try:
+            open_with_default_app(path)
+        except OSError as error:
+            raise HTTPException(
+                status_code=500,
+                detail=(
+                    "Windows không mở được tệp. "
+                    "Hãy kiểm tra ứng dụng mặc định cho loại tệp này."
+                ),
+            ) from error
+        return {"opened": True}
+
+    @app.post("/api/v1/received/phone/{upload_id}/open")
+    def open_phone_upload_in_windows(upload_id: str) -> dict[str, bool]:
+        return open_received_file(phone_upload_path(upload_id))
+
+    @app.post("/api/v1/received/computer/{transfer_id}/{item_id}/open")
+    def open_computer_upload_in_windows(transfer_id: str, item_id: str) -> dict[str, bool]:
+        return open_received_file(computer_upload_path(transfer_id, item_id))
+
+    def preview_response(request: Request, path: Path, file_url: str) -> HTMLResponse:
+        suffix = path.suffix.lower()
+        kind = (
+            "image" if suffix in {".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp"}
+            else "video" if suffix in {".mp4", ".webm"}
+            else "audio" if suffix in {".mp3", ".ogg"}
+            else "text" if suffix in TEXT_PREVIEW_SUFFIXES
+            else "pdf" if suffix == ".pdf"
+            else "other"
+        )
+        preview_text = ""
+        truncated = False
+        if kind == "text":
+            try:
+                with path.open("rb") as source:
+                    content = source.read(256 * 1024 + 1)
+            except OSError as error:
+                raise HTTPException(
+                    status_code=404, detail="This file is no longer available."
+                ) from error
+            truncated = len(content) > 256 * 1024
+            preview_text = content[:256 * 1024].decode("utf-8", errors="replace")
+        return templates.TemplateResponse(
+            request=request,
+            name="preview.html",
+            context={
+                "filename": path.name, "kind": kind, "file_url": file_url,
+                "preview_text": preview_text, "truncated": truncated,
+            },
+        )
+
+    @app.get("/api/v1/received/phone/{upload_id}/preview", response_class=HTMLResponse)
+    def preview_phone_upload(request: Request, upload_id: str) -> HTMLResponse:
+        path = phone_upload_path(upload_id)
+        return preview_response(request, path, f"/api/v1/received/phone/{quote(upload_id)}")
+
+    @app.get("/api/v1/received/phone/{upload_id}", response_class=FileResponse)
+    def open_phone_upload(upload_id: str, download: bool = False) -> FileResponse:
+        return received_file_response(phone_upload_path(upload_id), download=download)
+
+    @app.get(
+        "/api/v1/received/computer/{transfer_id}/{item_id}/preview",
+        response_class=HTMLResponse,
+    )
+    def preview_computer_upload(request: Request, transfer_id: str, item_id: str) -> HTMLResponse:
+        path = computer_upload_path(transfer_id, item_id)
+        file_url = (
+            f"/api/v1/received/computer/{quote(transfer_id)}/{quote(item_id)}"
+        )
+        return preview_response(request, path, file_url)
+
+    @app.get(
+        "/api/v1/received/computer/{transfer_id}/{item_id}", response_class=FileResponse
+    )
+    def open_computer_upload(
+        transfer_id: str, item_id: str, download: bool = False
+    ) -> FileResponse:
+        return received_file_response(
+            computer_upload_path(transfer_id, item_id), download=download
+        )
 
     @app.get("/api/v1/peers")
     def peers() -> list[dict[str, Any]]:

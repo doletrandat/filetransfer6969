@@ -55,12 +55,21 @@ function renderDownloads(items) {
   }
   for (const item of items) {
     const row = document.createElement("li");
+    const actions = document.createElement("div");
+    actions.className = "download-actions";
+    const preview = document.createElement("a");
+    preview.className = "download-link";
+    preview.href = `/phone/api/files/${encodeURIComponent(item.id)}?preview=1`;
+    preview.target = "_blank";
+    preview.rel = "noopener noreferrer";
+    preview.textContent = "Mở";
     const link = document.createElement("a");
     link.className = "download-link";
     link.href = `/phone/api/files/${encodeURIComponent(item.id)}`;
     link.download = item.name.split(/[\\/]/).at(-1);
     link.textContent = "Tải về";
-    row.append(fileDetails(item.name, item.size), link);
+    actions.append(preview, link);
+    row.append(fileDetails(item.name, item.size), actions);
     elements.downloadList.append(row);
   }
 }

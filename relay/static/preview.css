@@ -1,0 +1,14 @@
+:root { color-scheme: light; }
+* { box-sizing: border-box; }
+body { margin: 0; background: #f5f8ff; color: #1c2942; font: 16px/1.5 "Segoe UI", system-ui, sans-serif; }
+main { width: min(960px, 100%); margin: 0 auto; padding: 32px 20px 48px; }
+.brand { margin: 0 0 12px; color: #365cc4; font-weight: 800; }
+h1 { margin: 0 0 22px; overflow-wrap: anywhere; font-size: clamp(1.3rem, 4vw, 2rem); }
+p { color: #66738b; }
+.preview { display: block; width: 100%; max-height: 70vh; margin-bottom: 24px; border-radius: 12px; background: #101722; object-fit: contain; }
+audio.preview { min-height: 60px; }
+.preview-text { max-height: 70vh; margin: 0; overflow: auto; padding: 18px; border: 1px solid #dde5f1; border-radius: 12px; background: #fff; color: #1c2942; white-space: pre-wrap; overflow-wrap: anywhere; }
+.actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 24px; }
+.actions a { display: inline-block; padding: 10px 16px; border: 1px solid #365cc4; border-radius: 9px; background: #365cc4; color: #fff; font-weight: 700; text-decoration: none; }
+.actions a.secondary { background: #fff; color: #365cc4; }
+a:focus-visible { outline: 3px solid #efa928; outline-offset: 3px; }

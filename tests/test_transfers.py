@@ -64,6 +64,92 @@ def test_staging_and_incoming_file_are_verified(tmp_path: Path) -> None:
     assert hashlib.sha256(content).hexdigest() == staged.sha256
 
 
+def test_incoming_uses_receive_root_without_creating_batch_folders(tmp_path: Path) -> None:
+    settings = SettingsStore(tmp_path / "data")
+    root = settings.load().destination
+    (root / "report.txt").write_bytes(b"existing")
+    manager = TransferManager(
+        tmp_path / "data", settings,
+        DeviceIdentity(id="local", name="Local PC", fingerprint="A" * 64),
+        cast(DiscoveryManager, EmptyDiscovery()),
+    )
+
+    def manifest(item_id: str, relative_path: str, content: bytes) -> IncomingManifestRequest:
+        return IncomingManifestRequest(
+            batch_name="batch",
+            source=DeviceMessage(id="remote", name="Remote PC", fingerprint="B" * 64),
+            items=[TransferManifestItem(
+                id=item_id, relative_path=relative_path, size=len(content),
+                sha256=hashlib.sha256(content).hexdigest(),
+            )],
+        )
+
+    first = manager.create_incoming(manifest("file-1", "report.txt", b"new"))
+    asyncio.run(manager.receive_file(first.transfer_id, "file-1", stream_bytes(b"new")))
+    assert Path(first.destination) == root
+    assert (root / "report.txt").read_bytes() == b"existing"
+    assert (root / "report (2).txt").read_bytes() == b"new"
+
+    duplicate = manager.create_incoming(manifest("file-2", "report.txt", b"new"))
+    assert duplicate.completed_item_ids == ["file-2"]
+    assert not (root / "report (3).txt").exists()
+
+    nested = manager.create_incoming(manifest("file-3", "project/notes.txt", b"notes"))
+    asyncio.run(manager.receive_file(nested.transfer_id, "file-3", stream_bytes(b"notes")))
+    assert (root / "project" / "notes.txt").read_bytes() == b"notes"
+    assert not (root / "batch").exists()
+    assert not (root / "project (2)").exists()
+
+
+def test_concurrent_incoming_transfers_reserve_distinct_files(tmp_path: Path) -> None:
+    settings = SettingsStore(tmp_path / "data")
+    manager = TransferManager(
+        tmp_path / "data", settings,
+        DeviceIdentity(id="local", name="Local PC", fingerprint="A" * 64),
+        cast(DiscoveryManager, EmptyDiscovery()),
+    )
+    source = DeviceMessage(id="remote", name="Remote PC", fingerprint="B" * 64)
+    transfers = []
+    for item_id, content in (("file-1", b"first"), ("file-2", b"second")):
+        request = IncomingManifestRequest(
+            batch_name="batch", source=source,
+            items=[TransferManifestItem(
+                id=item_id, relative_path="note.txt", size=len(content),
+                sha256=hashlib.sha256(content).hexdigest(),
+            )],
+        )
+        transfers.append((manager.create_incoming(request), item_id, content))
+    for transfer, item_id, content in transfers:
+        asyncio.run(manager.receive_file(transfer.transfer_id, item_id, stream_bytes(content)))
+    root = settings.load().destination
+    assert (root / "note.txt").read_bytes() == b"first"
+    assert (root / "note (2).txt").read_bytes() == b"second"
+
+
+def test_incoming_does_not_replace_a_file_created_during_transfer(tmp_path: Path) -> None:
+    settings = SettingsStore(tmp_path / "data")
+    manager = TransferManager(
+        tmp_path / "data", settings,
+        DeviceIdentity(id="local", name="Local PC", fingerprint="A" * 64),
+        cast(DiscoveryManager, EmptyDiscovery()),
+    )
+    content = b"remote content"
+    manifest = IncomingManifestRequest(
+        batch_name="batch",
+        source=DeviceMessage(id="remote", name="Remote PC", fingerprint="B" * 64),
+        items=[TransferManifestItem(
+            id="file-1", relative_path="note.txt", size=len(content),
+            sha256=hashlib.sha256(content).hexdigest(),
+        )],
+    )
+    transfer = manager.create_incoming(manifest)
+    root = settings.load().destination
+    (root / "note.txt").write_bytes(b"local content")
+    asyncio.run(manager.receive_file(transfer.transfer_id, "file-1", stream_bytes(content)))
+    assert (root / "note.txt").read_bytes() == b"local content"
+    assert (root / "note (2).txt").read_bytes() == content
+
+
 def test_chunked_upload_retries_a_completed_chunk(tmp_path: Path) -> None:
     manager = TransferManager(
         tmp_path / "data",

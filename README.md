@@ -39,8 +39,8 @@ Cấu hình, chứng chỉ cục bộ và trạng thái truyền được lưu t
 - **Truyền và theo dõi giữa hai máy Windows:** gửi tệp theo từng khối qua HTTPS; hiển thị tiến độ, tốc độ và trạng thái ở mục **Đã gửi** và **Đã nhận**.
 - **Kiểm tra dữ liệu giữa hai máy Windows:** so sánh SHA-256 sau khi nhận; chỉ hoàn tất tệp khi kích thước và mã băm khớp với thông tin gửi đi.
 - **Xử lý gián đoạn:** thử lại khối truyền khi có lỗi mạng; lưu trạng thái và dữ liệu đã đưa vào hàng chờ để người gửi có thể tiếp tục sau khi khởi động lại.
-- **Tránh trùng tên:** tạo thư mục nhận riêng cho mỗi lượt truyền, kể cả khi gửi lại cùng tên.
-- **Kết nối điện thoại:** tạo liên kết QR dùng một lần để điện thoại gửi tệp vào máy Windows hoặc tải các tệp trong hàng chờ của máy Windows về điện thoại. Tệp mới nhận hiển thị trong **Tệp từ điện thoại** trên máy tính, kèm đường dẫn để sao chép; lịch sử được lưu qua lần khởi động lại.
+- **Tránh trùng tên:** lưu tệp trực tiếp trong thư mục nhận, giữ cấu trúc thư mục do người gửi chọn; tệp khác nội dung nhưng trùng tên được thêm hậu tố, tệp giống hệt được dùng lại.
+- **Kết nối điện thoại:** tạo liên kết QR dùng một lần để điện thoại gửi tệp vào máy Windows hoặc mở/tải tệp trong hàng chờ. Tệp điện thoại gửi lên được lưu chung trong thư mục `From phone` và có thể mở từ giao diện máy tính.
 
 ## Công nghệ sử dụng
 
@@ -57,11 +57,11 @@ Các thư viện và phiên bản tối thiểu được khai báo trong [`pypro
 ## Hướng dẫn sử dụng và kịch bản demo
 
 1. Kết nối hai máy Windows vào cùng mạng Wi-Fi hoặc Ethernet. Nếu Windows Firewall hỏi quyền truy cập, cho phép Relay trên mạng **Private**.
-2. Chạy Relay trên cả hai máy. Kiểm tra tên máy trong phần **Kết nối máy tính**. Trên máy nhận, có thể đổi nơi lưu tệp tại **Thư mục lưu tệp nhận**; mặc định là `Downloads\Relay` trong thư mục người dùng.
-3. Trên máy nhận, chọn **Tạo mã để máy khác kết nối vào đây**.
-4. Trên máy gửi, nhập mã 8 ký tự và chọn **Kết nối**. Có thể dùng **Quét mã QR ghép nối** nếu trình duyệt hỗ trợ `BarcodeDetector` và có camera. Sau đó chọn thiết bị đã ghép đôi.
+2. Chạy Relay trên cả hai máy. Kiểm tra tên máy ở màn **Nhận**. Có thể đổi nơi lưu tệp tại **Lịch sử → Thư mục lưu tệp nhận**; mặc định là `Downloads\Relay` trong thư mục người dùng.
+3. Trên máy nhận, chọn **Tạo mã ghép nối**.
+4. Trên máy gửi, vào màn **Gửi**, mở **Kết nối bằng mã hoặc mã QR**, nhập mã 8 ký tự và chọn **Kết nối**. Có thể dùng **Quét mã QR ghép nối** nếu trình duyệt hỗ trợ `BarcodeDetector` và có camera. Sau đó chọn thiết bị đã ghép đôi.
 5. Chọn **Chọn tệp** hoặc **Chọn thư mục**. Đợi các tệp xuất hiện trong **Tệp đã chọn**, rồi chọn **Gửi đến [tên máy]**.
-6. Theo dõi hai cột **Đã gửi** và **Đã nhận**. Khi hoàn tất, mở thư mục nhận để kiểm tra tên và nội dung tệp. Thử gửi lại cùng tên để quan sát thư mục nhận mới.
+6. Theo dõi hai cột **Đã gửi** và **Đã nhận** trong **Lịch sử**. Chọn tên tệp đã nhận để mở bằng ứng dụng mặc định trên máy nhận. Gửi lại tệp cùng tên để kiểm tra cách Relay giữ bản trùng mà không tạo thư mục `batch` mới.
 7. Để minh họa khôi phục, bắt đầu gửi một tệp lớn rồi dừng Relay giữa chừng. Khởi chạy lại cả hai bên nếu cần, tạo mã mới trên máy nhận, ghép đôi lại trên máy gửi và chọn **Thử gửi lại**.
 
 Nếu không thấy máy bên kia, kiểm tra hai máy có cùng mạng, mạng Windows đang ở chế độ **Private** và Firewall cho phép kết nối. Mã nhập thủ công cần mDNS để tìm máy nhận. Mã QR có kèm địa chỉ thiết bị, nên có thể ghép đôi khi mDNS bị chặn nhưng hai máy vẫn kết nối trực tiếp được. Nếu trình duyệt không quét được QR, dùng mã thủ công sau khi khắc phục vấn đề tìm thiết bị.
@@ -69,11 +69,11 @@ Nếu không thấy máy bên kia, kiểm tra hai máy có cùng mạng, mạng 
 ## Dùng với điện thoại
 
 1. Cho máy Windows và điện thoại vào cùng mạng Wi-Fi. Chạy Relay trên máy Windows, cho phép kết nối qua Windows Firewall trên mạng **Private** và mở giao diện `https://127.0.0.1:<cổng>` trên chính máy đó.
-2. Trên giao diện máy tính, chọn **Tạo mã QR cho điện thoại**. Dùng camera của điện thoại quét mã QR hoặc mở liên kết hiện bên dưới mã. Liên kết có hiệu lực **10 phút** và chỉ dùng **một lần**.
-3. Trên điện thoại, kiểm tra địa chỉ IP trong liên kết là IP của máy Windows rồi chọn **Kết nối với Relay**. Phiên kết nối có hiệu lực tối đa **1 giờ**. Nếu trình duyệt cảnh báo chứng chỉ tự tạo, chỉ tiếp tục khi đang kết nối tới đúng máy của mình.
-4. **Điện thoại → máy tính:** chọn tệp/ảnh trong phần **Chọn ảnh hoặc tệp**, rồi chọn **Gửi đến máy tính**. Điện thoại xác nhận tên thư mục sau khi gửi. Trên máy tính, xem khu vực **Tệp từ điện thoại**: tệp mới nhận hiện ở đầu danh sách cùng đường dẫn đầy đủ và nút **Sao chép đường dẫn**. Dán đường dẫn đó vào File Explorer để mở tệp. Có thể chọn **Bật thông báo trên máy tính** để nhận thông báo của trình duyệt khi tab Relay đang ở nền. Mỗi lần kết nối được lưu vào một thư mục `From phone`, `From phone (2)`, ... trong thư mục nhận; tệp trùng tên cũng được đổi tên để giữ cả hai bản.
-5. **Máy tính → điện thoại:** chọn tệp bằng **Chọn tệp** trên máy tính và chờ tệp xuất hiện ở **Tệp đã chọn**. Trên điện thoại, chọn **Làm mới danh sách** rồi **Tải về** từng tệp. Không cần chọn **Gửi đến [tên máy]** cho cách truyền này. Tệp đã tải về vẫn ở hàng chờ của máy tính cho đến khi được xóa hoặc dùng trong lượt truyền khác.
-6. Khi xong, chọn **Ngắt kết nối điện thoại** trên máy tính để thu hồi phiên. Tạo liên kết mới nếu muốn kết nối lại.
+2. Trên màn **Nhận** của máy tính, chọn **Hiện mã QR**. Dùng camera điện thoại quét mã QR hoặc mở liên kết hiện bên dưới mã. Liên kết có hiệu lực **10 phút** và chỉ dùng **một lần**.
+3. Trên điện thoại, kiểm tra địa chỉ IP trong liên kết là IP của máy Windows rồi chọn **Kết nối với Relay**. Máy tính sẽ báo **Điện thoại đã kết nối** ngay cả khi chưa gửi tệp. Phiên kết nối có hiệu lực tối đa **1 giờ**; trạng thái hoạt động sẽ tắt khi trang điện thoại ngừng liên lạc. Nếu trình duyệt cảnh báo chứng chỉ tự tạo, chỉ tiếp tục khi đang kết nối tới đúng máy của mình.
+4. **Điện thoại → máy tính:** chọn tệp/ảnh trong màn **Gửi lên máy tính**, rồi chọn **Gửi đến máy tính**. Trên máy tính, tệp hiện ở **Tệp từ điện thoại** và trong cột **Đã nhận** của **Lịch sử**; chọn **Mở tệp** để mở bằng ứng dụng mặc định của Windows hoặc **Sao chép đường dẫn** để mở bằng File Explorer. Các phiên dùng chung thư mục `From phone`; tệp khác nội dung nhưng trùng tên được thêm hậu tố.
+5. **Máy tính → điện thoại:** chọn tệp bằng **Chọn tệp** trên máy tính và chờ tệp xuất hiện ở **Tệp đã chọn**. Trên điện thoại, vào **Tải về điện thoại**, chọn **Mở** để xem trong trình duyệt hoặc **Tải về** để lưu. Không cần chọn **Gửi đến [tên máy]** cho cách truyền này.
+6. Khi xong, chọn **Ngắt kết nối** trên máy tính để thu hồi phiên. Tạo liên kết mới nếu muốn kết nối lại.
 
 Trang điện thoại chỉ chuyển **từng tệp**. Trình duyệt quyết định nơi lưu tệp tải xuống trên điện thoại. Nếu liên kết không mở được, kiểm tra hai thiết bị cùng mạng, IP trong mã QR và cài đặt Firewall; trang điện thoại không cần mDNS.
 
@@ -111,6 +111,7 @@ flowchart LR
 - Kết nối giữa hai máy sử dụng HTTPS. Relay kiểm tra fingerprint chứng chỉ của thiết bị được ghép đôi trước khi truyền.
 - API nhận tệp yêu cầu phiên ghép đôi còn hiệu lực; mã ghép đôi chỉ dùng một lần và không được trả về cho máy khác trong mạng.
 - Đường dẫn tệp nhận được kiểm tra để không ghi ra ngoài thư mục đích. Với truyền giữa hai máy Windows, tệp chỉ được hoàn tất sau khi SHA-256 khớp.
+- Nút **Mở tệp** trên máy tính chỉ hoạt động từ giao diện cục bộ và dùng ứng dụng mặc định của Windows. Mục lịch sử có tệp đã bị xóa được đánh dấu **Tệp không còn trên máy**. Trên điện thoại, liên kết **Mở** chỉ hoạt động trong phiên đã kết nối; HTML, SVG và mã nguồn được hiển thị như văn bản, còn loại tệp không hỗ trợ xem trước được tải xuống.
 - Trang điện thoại cần liên kết QR dùng một lần; phiên được giữ bằng cookie bảo mật và thao tác tải lên cần thêm token. Người dùng có thể thu hồi phiên từ máy tính.
 
 ## Kiểm thử
@@ -126,7 +127,7 @@ Cài thêm công cụ phát triển và chạy bộ kiểm thử:
 
 Bộ kiểm thử tự động bao gồm kiểm tra đường dẫn an toàn, mã ghép đôi dùng một lần, xử lý gián đoạn và khôi phục truyền tệp, quyền truy cập API, khám phá thiết bị, kết nối điện thoại/tải lên/tải xuống và một kịch bản truyền tệp qua HTTPS trên loopback. Khi bảo vệ bài tập lớn, nên demo trên **hai thiết bị thật** để kiểm tra thêm Firewall, mDNS và kết nối mạng thực tế; bộ kiểm thử trên một máy không thay thế được bước này.
 
-Kết quả kiểm tra trên môi trường Python 3.11: **28 bài kiểm thử đạt**, Ruff không báo lỗi và mypy không tìm thấy lỗi trong mã nguồn. Pytest có một cảnh báo về tương thích giữa các thư viện kiểm thử, không làm bài kiểm thử thất bại.
+Kết quả kiểm tra trên môi trường hiện tại: **33 bài kiểm thử đạt**, Ruff không báo lỗi và mypy không tìm thấy lỗi trong mã nguồn. Pytest có một cảnh báo về tương thích giữa các thư viện kiểm thử, không làm bài kiểm thử thất bại.
 
 ## Giới hạn hiện tại
 

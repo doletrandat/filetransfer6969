@@ -61,6 +61,7 @@ ul { padding: 0; list-style: none; }
 .file-details strong { display: block; color: var(--ink); }
 .file-details span { color: var(--muted); font-size: .82rem; }
 .download-link { flex: none; }
+.download-actions { display: flex; flex: none; gap: 7px; }
 .connection-status { margin: 19px 0 0; color: var(--muted); font-size: .8rem; text-align: center; }
 
 .connect-page { max-width: 560px; padding-top: 62px; text-align: center; }
@@ -77,6 +78,7 @@ ul { padding: 0; list-style: none; }
   .phone-tab { padding: 8px 6px; font-size: .8rem; }
   .receive-heading { flex-wrap: wrap; }
   .download-list li { align-items: stretch; flex-direction: column; }
-  .download-link { width: 100%; }
+  .download-actions { width: 100%; }
+  .download-actions .download-link { flex: 1; min-width: 0; }
   .connect-page { padding-top: 46px; }
 }

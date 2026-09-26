@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{ filename }} — Relay</title>
+  <link rel="stylesheet" href="/static/preview.css">
+</head>
+<body>
+  <main>
+    <p class="brand">Relay</p>
+    <h1>{{ filename }}</h1>
+    {% if kind == "image" %}
+    <img class="preview" src="{{ file_url }}" alt="{{ filename }}">
+    {% elif kind == "video" %}
+    <video class="preview" controls preload="metadata" src="{{ file_url }}">Trình duyệt không hỗ trợ phát video này.</video>
+    {% elif kind == "audio" %}
+    <audio class="preview" controls preload="metadata" src="{{ file_url }}">Trình duyệt không hỗ trợ phát âm thanh này.</audio>
+    {% elif kind == "text" %}
+    <pre class="preview-text">{{ preview_text }}</pre>
+    {% if truncated %}<p>Chỉ hiển thị phần đầu của tệp. Tải về để xem toàn bộ.</p>{% endif %}
+    {% elif kind == "pdf" %}
+    <p>Chọn “Xem PDF” để mở trong trình duyệt, hoặc tải về để mở bằng ứng dụng trên máy.</p>
+    {% else %}
+    <p>Trình duyệt không xem trước được loại tệp này. Bạn có thể tải tệp về để mở bằng ứng dụng trên máy.</p>
+    {% endif %}
+    <div class="actions">
+      {% if kind == "pdf" %}<a href="{{ file_url }}" target="_blank" rel="noopener noreferrer">Xem PDF</a>{% endif %}
+      <a href="{{ file_url }}?download=1">Tải tệp về</a>
+      <a class="secondary" href="/">Quay lại Relay</a>
+    </div>
+  </main>
+</body>
+</html>

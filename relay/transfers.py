@@ -71,17 +71,6 @@ def sanitize_relative_path(value: str) -> Path:
     return Path(*safe_parts)
 
 
-def allocate_batch_destination(root: Path, batch_name: str) -> Path:
-    safe_name = sanitize_relative_path(batch_name).name
-    candidate = root / safe_name
-    suffix = 2
-    while candidate.exists():
-        candidate = root / f"{safe_name} ({suffix})"
-        suffix += 1
-    candidate.mkdir(parents=True)
-    return candidate
-
-
 def safe_join(root: Path, relative_path: str) -> Path:
     relative = sanitize_relative_path(relative_path)
     candidate = (root / relative).resolve()
@@ -232,6 +221,19 @@ class IncomingTransfer:
             "received_bytes": self.received_bytes,
             "speed_bps": self.speed_bps,
             "completed_item_ids": self.completed_item_ids,
+            "items": [
+                {
+                    "id": item.id,
+                    "name": item.target.name,
+                    "relative_path": item.relative_path,
+                    "size": item.size,
+                    "completed": item.completed,
+                    "available": (
+                        item.completed and item.target.is_file() and not item.target.is_symlink()
+                    ),
+                }
+                for item in self.items
+            ],
             "created_at": self.created_at,
             "updated_at": self.updated_at,
         }
@@ -693,41 +695,46 @@ class TransferManager:
         if any(not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", item.id) for item in request.items):
             raise TransferError("The transfer manifest contains an invalid file ID.")
         identifiers = [item.id for item in request.items]
-        paths = [str(sanitize_relative_path(item.relative_path)) for item in request.items]
+        paths = [
+            str(sanitize_relative_path(item.relative_path)).casefold()
+            for item in request.items
+        ]
         if len(set(identifiers)) != len(identifiers) or len(set(paths)) != len(paths):
             raise TransferError("The transfer manifest contains duplicate files.")
-        destination = allocate_batch_destination(
-            self._settings.load().destination, request.batch_name
-        )
-        items: list[IncomingItem] = []
-        for item in request.items:
-            target = safe_join(destination, item.relative_path)
-            target.parent.mkdir(parents=True, exist_ok=True)
-            completed = (
-                target.exists()
-                and target.stat().st_size == item.size
-                and _sha256(target) == item.sha256.lower()
-            )
-            items.append(
-                IncomingItem(
+        with self._lock:
+            destination = self._settings.load().destination.resolve()
+            reserved = {
+                str(item.target).casefold()
+                for transfer in self._incoming.values()
+                for item in transfer.items
+                if not item.completed
+            }
+            items: list[IncomingItem] = []
+            for item in request.items:
+                digest = item.sha256.lower()
+                target, completed = self._received_target(
+                    destination, item.relative_path, item.size, digest, reserved
+                )
+                if not completed:
+                    target.parent.mkdir(parents=True, exist_ok=True)
+                    reserved.add(str(target).casefold())
+                items.append(IncomingItem(
                     id=item.id,
-                    relative_path=item.relative_path,
+                    relative_path=str(target.relative_to(destination)),
                     size=item.size,
-                    sha256=item.sha256.lower(),
+                    sha256=digest,
                     target=target,
                     completed=completed,
                     received_bytes=item.size if completed else 0,
-                )
+                ))
+            transfer = IncomingTransfer(
+                id=uuid.uuid4().hex,
+                batch_name=request.batch_name,
+                source=request.source,
+                destination=destination,
+                items=items,
+                status="complete" if all(item.completed for item in items) else "receiving",
             )
-        transfer = IncomingTransfer(
-            id=uuid.uuid4().hex,
-            batch_name=request.batch_name,
-            source=request.source,
-            destination=destination,
-            items=items,
-            status="complete" if all(item.completed for item in items) else "receiving",
-        )
-        with self._lock:
             self._incoming[transfer.id] = transfer
             self._save_state()
         return IncomingManifestResponse(
@@ -735,6 +742,26 @@ class TransferManager:
             completed_item_ids=transfer.completed_item_ids,
             destination=str(destination),
         )
+
+    @staticmethod
+    def _received_target(
+        root: Path, relative_path: str, size: int, digest: str, reserved: set[str]
+    ) -> tuple[Path, bool]:
+        original = sanitize_relative_path(relative_path)
+        candidate_path = original
+        suffix = 2
+        while True:
+            candidate = safe_join(root, str(candidate_path))
+            if str(candidate).casefold() not in reserved:
+                if candidate.is_file():
+                    if candidate.stat().st_size == size and _sha256(candidate) == digest:
+                        return candidate, True
+                elif not candidate.exists():
+                    return candidate, False
+            candidate_path = original.with_name(
+                f"{original.stem[:200]} ({suffix}){original.suffix}"
+            )
+            suffix += 1
 
     async def receive_file(
         self,
@@ -818,12 +845,29 @@ class TransferManager:
             return {"received_bytes": new_size, "complete": False}
         if new_size != item.size or item.digest.hexdigest() != item.sha256:
             raise TransferError(f"{item.relative_path} failed its integrity check.")
-        os.replace(part_path, item.target)
-        item.completed = True
-        if all(candidate.completed for candidate in transfer.items):
-            transfer.status = "complete"
-        transfer.updated_at = time.time()
         with self._lock:
+            if item.target.exists():
+                reserved = {
+                    str(candidate.target).casefold()
+                    for incoming in self._incoming.values()
+                    for candidate in incoming.items
+                    if candidate is not item and not candidate.completed
+                }
+                item.target, already_present = self._received_target(
+                    transfer.destination, item.relative_path, item.size, item.sha256,
+                    reserved,
+                )
+                item.relative_path = str(item.target.relative_to(transfer.destination))
+                if already_present:
+                    part_path.unlink()
+                else:
+                    os.replace(part_path, item.target)
+            else:
+                os.replace(part_path, item.target)
+            item.completed = True
+            if all(candidate.completed for candidate in transfer.items):
+                transfer.status = "complete"
+            transfer.updated_at = time.time()
             self._save_state()
         return {"received_bytes": item.size, "complete": True}
 

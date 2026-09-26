@@ -17,7 +17,6 @@ from typing import Any
 from relay.transfers import (
     MAX_FILE_SIZE,
     TransferError,
-    allocate_batch_destination,
     safe_join,
     sanitize_relative_path,
 )
@@ -25,14 +24,15 @@ from relay.transfers import (
 INVITE_TTL_SECONDS = 600
 PHONE_SESSION_TTL_SECONDS = 3600
 PHONE_COOKIE_NAME = "relay_phone_session"
+PHONE_ACTIVE_SECONDS = 15
 
 
 @dataclass(slots=True)
 class PhoneSession:
     csrf_token: str
     expires_at: float
-    batch_dir: Path | None = None
-    reserved_names: set[str] = field(default_factory=set)
+    connected_at: float = 0.0
+    last_seen_at: float = 0.0
     uploaded: list[dict[str, Any]] = field(default_factory=list)
 
 
@@ -48,6 +48,23 @@ class PhoneAccess:
         self._invite_digest: str | None = None
         self._invite_expires_at = 0.0
         self._sessions: dict[str, PhoneSession] = {}
+        self._reserved_targets: set[str] = set()
+
+    def connection_state(self) -> dict[str, Any]:
+        now = time.time()
+        with self._lock:
+            active = [
+                session for session in self._sessions.values()
+                if session.expires_at > now and now - session.last_seen_at <= PHONE_ACTIVE_SECONDS
+            ]
+            if active:
+                return {
+                    "status": "connected",
+                    "connected_at": max(session.connected_at for session in active),
+                }
+            if self._invite_digest is not None and self._invite_expires_at > now:
+                return {"status": "waiting", "connected_at": None}
+            return {"status": "disconnected", "connected_at": None}
 
     def create_invitation(self) -> tuple[str, float]:
         token = secrets.token_urlsafe(32)
@@ -70,9 +87,12 @@ class PhoneAccess:
             self._invite_digest = None
             self._invite_expires_at = 0.0
             cookie = secrets.token_urlsafe(32)
+            now = time.time()
             session = PhoneSession(
                 csrf_token=secrets.token_urlsafe(32),
-                expires_at=time.time() + PHONE_SESSION_TTL_SECONDS,
+                expires_at=now + PHONE_SESSION_TTL_SECONDS,
+                connected_at=now,
+                last_seen_at=now,
             )
             self._sessions[self._digest(cookie)] = session
             return cookie, session
@@ -96,6 +116,7 @@ class PhoneAccess:
             if session.expires_at <= time.time():
                 del self._sessions[digest]
                 return None
+            session.last_seen_at = time.time()
             return session
 
     def revoke(self) -> None:
@@ -110,7 +131,14 @@ class PhoneAccess:
 
     def recent_uploads(self) -> list[dict[str, Any]]:
         with self._lock:
-            return [item.copy() for item in self._history[:50]]
+            uploads = [item.copy() for item in self._history[:50]]
+        for item in uploads:
+            path = Path(str(item.get("path", "")))
+            try:
+                item["available"] = path.is_file() and not path.is_symlink()
+            except OSError:
+                item["available"] = False
+        return uploads
 
     def import_existing(self, destination_root: Path) -> None:
         """Make files received by older Relay versions visible in the desktop inbox."""
@@ -152,7 +180,7 @@ class PhoneAccess:
         filename: str,
         stream: AsyncIterable[bytes],
     ) -> dict[str, Any]:
-        target, part_path = self._reserve_target(session, destination_root, filename)
+        target, part_path = self._reserve_target(destination_root, filename)
         digest = hashlib.sha256()
         size = 0
         try:
@@ -163,17 +191,21 @@ class PhoneAccess:
                         raise TransferError("The selected file is too large.")
                     output.write(chunk)
                     digest.update(chunk)
-            os.replace(part_path, target)
-            result: dict[str, Any] = {
-                "id": uuid.uuid4().hex,
-                "name": target.name,
-                "size": size,
-                "sha256": digest.hexdigest(),
-                "folder": target.parent.name,
-                "path": str(target),
-                "received_at": time.time(),
-            }
             with self._lock:
+                if target.exists():
+                    self._reserved_targets.discard(str(target).casefold())
+                    target = self._available_target(target.parent, sanitize_relative_path(filename))
+                    self._reserved_targets.add(str(target).casefold())
+                os.replace(part_path, target)
+                result: dict[str, Any] = {
+                    "id": uuid.uuid4().hex,
+                    "name": target.name,
+                    "size": size,
+                    "sha256": digest.hexdigest(),
+                    "folder": target.parent.name,
+                    "path": str(target),
+                    "received_at": time.time(),
+                }
                 session.uploaded.append(result)
                 self._history.insert(0, result)
                 self._history = self._history[:50]
@@ -182,7 +214,7 @@ class PhoneAccess:
         finally:
             part_path.unlink(missing_ok=True)
             with self._lock:
-                session.reserved_names.discard(target.name.casefold())
+                self._reserved_targets.discard(str(target).casefold())
 
     def _save_history(self) -> None:
         try:
@@ -193,25 +225,29 @@ class PhoneAccess:
             print(f"Could not save phone upload history: {error}")
 
     def _reserve_target(
-        self, session: PhoneSession, destination_root: Path, filename: str
+        self, destination_root: Path, filename: str
     ) -> tuple[Path, Path]:
         safe_name = sanitize_relative_path(filename)
         if len(safe_name.parts) != 1:
             raise TransferError("Choose a file, not a path.")
         with self._lock:
-            if session.batch_dir is None:
-                session.batch_dir = allocate_batch_destination(destination_root, "From phone")
-            folder = session.batch_dir
-            candidate = safe_name.name
-            suffix = 2
-            while candidate.casefold() in session.reserved_names or (folder / candidate).exists():
-                base = safe_name.stem[:200]
-                candidate = f"{base} ({suffix}){safe_name.suffix}"
-                suffix += 1
-            target = safe_join(folder, candidate)
-            session.reserved_names.add(target.name.casefold())
+            folder = safe_join(destination_root, "From phone")
+            folder.mkdir(parents=True, exist_ok=True)
+            target = self._available_target(folder, safe_name)
+            self._reserved_targets.add(str(target).casefold())
             part_path = folder / f".{uuid.uuid4().hex}.part"
             return target, part_path
+
+    def _available_target(self, folder: Path, safe_name: Path) -> Path:
+        candidate = safe_name.name
+        suffix = 2
+        while (
+            str(folder / candidate).casefold() in self._reserved_targets
+            or (folder / candidate).exists()
+        ):
+            candidate = f"{safe_name.stem[:200]} ({suffix}){safe_name.suffix}"
+            suffix += 1
+        return safe_join(folder, candidate)
 
     @staticmethod
     def _digest(value: str) -> str:

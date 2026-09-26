@@ -6,7 +6,6 @@ import pytest
 
 from relay.transfers import (
     UnsafePathError,
-    allocate_batch_destination,
     safe_join,
     sanitize_relative_path,
 )
@@ -35,11 +34,3 @@ def test_sanitize_relative_path_rejects_escapes(value: str) -> None:
 
 def test_safe_join_stays_inside_root(tmp_path: Path) -> None:
     assert safe_join(tmp_path, "folder/file.txt") == (tmp_path / "folder" / "file.txt").resolve()
-
-
-def test_allocate_batch_destination_avoids_collision(tmp_path: Path) -> None:
-    (tmp_path / "Photos").mkdir()
-
-    destination = allocate_batch_destination(tmp_path, "Photos")
-
-    assert destination.name == "Photos (2)"
