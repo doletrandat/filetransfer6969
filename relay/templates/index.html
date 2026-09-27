@@ -3,80 +3,425 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="theme-color" content="#f6f7f9">
+  <meta name="theme-color" content="#f8fafc">
   <meta name="relay-control-token" content="{{ control_token }}">
   <title>Relay — Chia sẻ tệp trong mạng nội bộ</title>
+  <link rel="icon" type="image/svg+xml" href="/static/relay-mark.svg">
   <link rel="stylesheet" href="/static/styles.css?v={{ static_version }}">
   <script src="/static/app.js?v={{ static_version }}" defer></script>
 </head>
 <body>
   <div class="app-shell">
-    <aside class="sidebar" aria-label="Điều hướng">
-      <a class="brand" href="/" aria-label="Relay, trang chủ"><span class="brand-mark" aria-hidden="true">↗</span><span>Relay</span></a>
-      <div class="sidebar-group-label">KHÔNG GIAN LÀM VIỆC</div>
+    <aside class="sidebar" aria-label="Điều hướng chính">
+      <div class="sidebar-brand-wrapper">
+        <a class="brand" href="/" aria-label="Relay, trang chủ">
+          <span class="brand-mark" aria-hidden="true">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M7 17l9.2-9.2M17 17V8H8"/>
+            </svg>
+          </span>
+          <span class="brand-name">Relay</span>
+        </a>
+      </div>
+
       <nav class="view-nav" aria-label="Các màn hình">
-        <span class="nav-indicator" aria-hidden="true"></span>
-        <button class="nav-button is-active" type="button" data-view="receive" aria-current="page"><span class="nav-icon" aria-hidden="true">↓</span><span>Nhận</span></button>
-        <button class="nav-button" type="button" data-view="send"><span class="nav-icon" aria-hidden="true">↑</span><span>Gửi</span></button>
-        <button class="nav-button" type="button" data-view="activity"><span class="nav-icon history-icon" aria-hidden="true">◷</span><span>Lịch sử</span></button>
+        <button class="nav-button is-active" type="button" data-view="receive" aria-current="page">
+          <span class="nav-icon" aria-hidden="true">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+              <polyline points="7 10 12 15 17 10"/>
+              <line x1="12" y1="15" x2="12" y2="3"/>
+            </svg>
+          </span>
+          <span>Nhận</span>
+        </button>
+        <button class="nav-button" type="button" data-view="send">
+          <span class="nav-icon" aria-hidden="true">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+              <polyline points="17 8 12 3 7 8"/>
+              <line x1="12" y1="3" x2="12" y2="15"/>
+            </svg>
+          </span>
+          <span>Gửi</span>
+        </button>
+        <button class="nav-button" type="button" data-view="activity">
+          <span class="nav-icon history-icon" aria-hidden="true">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="12" cy="12" r="10"/>
+              <polyline points="12 6 12 12 16 14"/>
+            </svg>
+          </span>
+          <span>Lịch sử</span>
+        </button>
       </nav>
-      <div class="sidebar-foot"><span class="network-dot" aria-hidden="true"></span><span>Truyền trực tiếp trong mạng LAN</span></div>
     </aside>
 
     <div class="workspace">
       <header class="topbar">
-        <span class="topbar-title">Relay <span aria-hidden="true">/</span> <strong id="currentViewLabel">Nhận</strong></span>
-        <div class="connection-pills"><span class="connection-pill"><span class="signal-lamp" aria-hidden="true"></span>Máy tính đang trực tuyến</span><span class="connection-pill" id="phoneHeaderStatus" hidden><span class="signal-lamp" aria-hidden="true"></span>Điện thoại đã kết nối</span></div>
+        <div class="topbar-breadcrumb">
+          <span class="topbar-crumb-app">Relay</span>
+          <span class="topbar-crumb-sep" aria-hidden="true">/</span>
+          <strong id="currentViewLabel" class="topbar-crumb-current">Nhận</strong>
+        </div>
+        <div class="connection-pills">
+          <div class="connection-pill" id="systemStatusPill" role="status">
+            <span class="signal-lamp" id="systemStatusLamp" aria-hidden="true"></span>
+            <span id="systemStatusText">Trực tuyến</span>
+          </div>
+          <div class="connection-pill is-phone" id="phoneHeaderStatus" hidden>
+            <span class="signal-lamp" aria-hidden="true"></span>
+            <span>Điện thoại kết nối</span>
+          </div>
+        </div>
       </header>
 
       <main>
+        <!-- RECEIVE VIEW -->
         <section class="view" id="receiveView" aria-labelledby="receiveTitle">
-          <div class="view-heading receive-heading"><div><span class="eyebrow">THIẾT BỊ CỦA BẠN</span><h1 id="receiveTitle">Nhận tệp</h1><p>Máy này sẵn sàng nhận tệp từ các thiết bị trong cùng mạng.</p></div><span class="ready-state"><span class="status-dot" aria-hidden="true"></span>Sẵn sàng</span></div>
-
-          <section class="device-overview" aria-label="Thông tin thiết bị này">
-            <span class="device-overview-icon" aria-hidden="true">▣</span>
-            <div class="device-overview-copy"><span>TÊN THIẾT BỊ</span><strong id="deviceName">Đang khởi động…</strong></div>
-            <div class="device-overview-address"><span>ĐỊA CHỈ IP</span><code id="deviceAddress">Mạng nội bộ</code></div>
-          </section>
-
-          <div class="receive-actions">
-            <section class="quick-action" aria-labelledby="phoneTitle"><span class="action-icon" aria-hidden="true">▦</span><div><h2 id="phoneTitle">Điện thoại</h2><p id="phoneConnectionStatus" role="status">Chưa có điện thoại kết nối.</p></div><div class="action-buttons"><button class="button secondary" id="phoneConnectButton" type="button">Hiện mã QR</button><button class="text-button" id="phoneDisconnectButton" type="button" hidden>Ngắt kết nối</button></div></section>
-            <section class="quick-action" aria-labelledby="pairTitle"><span class="action-icon" aria-hidden="true">⌗</span><div><h2 id="pairTitle">Máy tính khác</h2><p>Chia sẻ mã dùng một lần để ghép nối.</p></div><button class="button secondary" id="createCodeButton" type="button">Tạo mã</button></section>
+          <div class="view-header">
+            <div>
+              <h1 id="receiveTitle">Nhận tệp</h1>
+              <p class="view-subtitle" id="receiveSubtitle">Sẵn sàng nhận tệp từ các máy tính và điện thoại trong cùng mạng.</p>
+            </div>
           </div>
 
+          <!-- Current Device Card -->
+          <section class="device-overview" aria-label="Thông tin thiết bị này">
+            <div class="device-overview-icon" aria-hidden="true">
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <rect x="2" y="3" width="20" height="14" rx="2" ry="2"/>
+                <line x1="8" y1="21" x2="16" y2="21"/>
+                <line x1="12" y1="17" x2="12" y2="21"/>
+              </svg>
+            </div>
+            <div class="device-overview-copy">
+              <span class="meta-label">Tên thiết bị</span>
+              <strong id="deviceName">Đang khởi động…</strong>
+            </div>
+            <div class="device-overview-address">
+              <span class="meta-label">Địa chỉ IP nội bộ</span>
+              <code id="deviceAddress">Đang tải…</code>
+            </div>
+            <div class="device-overview-network">
+              <span class="meta-label">Phạm vi mạng</span>
+              <span class="network-badge" id="deviceNetwork">Mạng cục bộ (LAN)</span>
+            </div>
+          </section>
+
+          <!-- Quick Connect Actions Grid -->
+          <div class="receive-actions">
+            <section class="quick-action" aria-labelledby="phoneTitle">
+              <div class="action-icon" aria-hidden="true">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <rect x="5" y="2" width="14" height="20" rx="2" ry="2"/>
+                  <line x1="12" y1="18" x2="12.01" y2="18"/>
+                </svg>
+              </div>
+              <div class="action-body">
+                <h2 id="phoneTitle">Điện thoại di động</h2>
+                <p id="phoneConnectionStatus" role="status">Chưa có điện thoại kết nối.</p>
+              </div>
+              <div class="action-buttons">
+                <button class="button secondary" id="phoneConnectButton" type="button">
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <rect x="3" y="3" width="7" height="7"/>
+                    <rect x="14" y="3" width="7" height="7"/>
+                    <rect x="14" y="14" width="7" height="7"/>
+                    <rect x="3" y="14" width="7" height="7"/>
+                  </svg>
+                  <span>Hiện mã QR</span>
+                </button>
+                <button class="button subtle-danger" id="phoneDisconnectButton" type="button" hidden>Ngắt kết nối</button>
+              </div>
+            </section>
+
+            <section class="quick-action" aria-labelledby="pairTitle">
+              <div class="action-icon" aria-hidden="true">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <rect x="2" y="4" width="20" height="16" rx="2"/>
+                  <path d="M6 8h.01M10 8h.01M14 8h.01M18 8h.01M6 12h.01M10 12h.01M14 12h.01M18 12h.01M7 16h10"/>
+                </svg>
+              </div>
+              <div class="action-body">
+                <h2 id="pairTitle">Máy tính khác</h2>
+                <p>Chia sẻ mã một lần 8 ký tự để ghép nối tức thì.</p>
+              </div>
+              <div class="action-buttons">
+                <button class="button secondary" id="createCodeButton" type="button">
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <line x1="12" y1="5" x2="12" y2="19"/>
+                    <line x1="5" y1="12" x2="19" y2="12"/>
+                  </svg>
+                  <span>Tạo mã</span>
+                </button>
+              </div>
+            </section>
+          </div>
+
+          <!-- Received Items List -->
           <section class="received-section" aria-labelledby="receiptTitle">
-            <div class="section-heading"><div><h2 id="receiptTitle">Tệp nhận gần đây</h2><p>Từ điện thoại và máy tính đã kết nối</p></div><div class="receipt-actions"><span class="count-badge" id="phoneUploadCount">0 tệp</span><button class="text-button" id="enableNotificationsButton" type="button">Bật thông báo</button></div></div>
-            <div id="phoneUploadsList" class="receive-list" aria-live="polite"><p class="empty-message">Chưa nhận tệp nào.</p></div>
+            <div class="section-heading">
+              <div>
+                <h2 id="receiptTitle">Tệp nhận gần đây</h2>
+                <p>Từ điện thoại và máy tính đã kết nối trong phiên</p>
+              </div>
+              <div class="receipt-actions">
+                <span class="count-badge" id="phoneUploadCount">0 lượt</span>
+                <button class="button ghost" id="enableNotificationsButton" type="button">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/>
+                    <path d="M13.73 21a2 2 0 0 1-3.46 0"/>
+                  </svg>
+                  <span>Bật thông báo</span>
+                </button>
+              </div>
+            </div>
+            <div id="phoneUploadsList" class="receive-list" aria-live="polite">
+              <div class="empty-state">
+                <div class="empty-icon" aria-hidden="true">
+                  <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                    <polyline points="7 10 12 15 17 10"/>
+                    <line x1="12" y1="15" x2="12" y2="3"/>
+                  </svg>
+                </div>
+                <p class="empty-message">Chưa nhận tệp nào. Kết nối điện thoại hoặc máy tính khác để bắt đầu.</p>
+              </div>
+            </div>
           </section>
         </section>
 
+        <!-- SEND VIEW -->
         <section class="view" id="sendView" aria-labelledby="sendTitle" hidden>
-          <div class="view-heading"><span class="eyebrow">TRUYỀN TỆP</span><h1 id="sendTitle">Gửi tệp</h1><p>Chọn tệp và thiết bị nhận trong cùng mạng.</p></div>
+          <div class="view-header">
+            <div>
+              <h1 id="sendTitle">Gửi tệp</h1>
+              <p class="view-subtitle">Chọn tệp và chọn thiết bị nhận trong cùng mạng nội bộ.</p>
+            </div>
+          </div>
+
           <section class="send-section" aria-label="Chọn tệp để gửi">
-            <div class="drop-zone" id="dropZone" aria-label="Khu vực kéo thả tệp"><span class="drop-symbol" aria-hidden="true">↑</span><div class="drop-copy"><strong>Kéo thả tệp vào đây</strong><span>Hoặc chọn từ máy tính của bạn</span></div><div class="file-actions"><input id="fileInput" type="file" multiple hidden><input id="folderInput" type="file" webkitdirectory directory multiple hidden><button class="button primary" id="chooseFilesButton" type="button">Chọn tệp</button><button class="button secondary" id="chooseFolderButton" type="button">Chọn thư mục</button></div></div>
-            <div class="queue-heading"><div><h2>Tệp đã chọn</h2><span id="queueSummary">Chưa chọn tệp</span></div><button class="text-button" id="clearStagedButton" type="button" disabled>Xóa tất cả</button></div>
-            <div class="file-queue" id="stagedList" aria-live="polite"><p class="empty-message">Tệp đã chọn sẽ hiển thị tại đây.</p></div>
+            <div class="drop-zone" id="dropZone" aria-label="Khu vực kéo thả tệp">
+              <div class="drop-symbol" aria-hidden="true">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                  <polyline points="17 8 12 3 7 8"/>
+                  <line x1="12" y1="3" x2="12" y2="15"/>
+                </svg>
+              </div>
+              <div class="drop-copy">
+                <strong>Kéo và thả tệp hoặc thư mục vào đây</strong>
+                <span>Hỗ trợ mọi định dạng tệp mà không giới hạn dung lượng</span>
+              </div>
+              <div class="file-actions">
+                <input id="fileInput" type="file" multiple hidden>
+                <input id="folderInput" type="file" webkitdirectory directory multiple hidden>
+                <button class="button primary" id="chooseFilesButton" type="button">
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                    <polyline points="14 2 14 8 20 8"/>
+                    <line x1="12" y1="18" x2="12" y2="12"/>
+                    <line x1="9" y1="15" x2="15" y2="15"/>
+                  </svg>
+                  <span>Chọn tệp</span>
+                </button>
+                <button class="button secondary" id="chooseFolderButton" type="button">
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
+                  </svg>
+                  <span>Chọn thư mục</span>
+                </button>
+              </div>
+            </div>
+
+            <div class="queue-heading">
+              <div class="queue-heading-left">
+                <h2>Tệp đã chuẩn bị</h2>
+                <span class="queue-summary" id="queueSummary">Chưa chọn tệp</span>
+              </div>
+              <button class="button ghost" id="clearStagedButton" type="button" disabled>Xóa tất cả</button>
+            </div>
+            <div class="file-queue" id="stagedList" aria-live="polite">
+              <p class="empty-message">Tệp đã chọn sẽ hiển thị tại đây.</p>
+            </div>
           </section>
 
           <section class="devices-section" aria-labelledby="computerTitle">
-            <div class="section-heading"><div><h2 id="computerTitle">Thiết bị gần đây</h2><p id="transferSubtitle">Chọn máy tính đã kết nối để gửi tệp.</p></div><div class="discovery-state" role="status"><span class="signal-lamp" id="discoveryLamp"></span><span id="discoveryText">Đang tìm</span></div></div>
-            <div id="deviceList" class="device-list" aria-live="polite"><div class="skeleton-row" aria-hidden="true"><i></i><span></span></div><div class="skeleton-row" aria-hidden="true"><i></i><span></span></div></div>
-            <details class="pairing-options" id="pairingOptions"><summary>Kết nối bằng mã hoặc QR</summary><form id="pairForm" class="code-form"><label for="pairingCode">Mã ghép nối 8 ký tự</label><div class="code-entry"><input id="pairingCode" name="code" autocomplete="one-time-code" maxlength="8" spellcheck="false" placeholder="ABCD2345" required><button class="button secondary" type="submit">Kết nối</button></div><p class="field-message" id="pairMessage" role="status">Nhập mã trên máy tính muốn kết nối.</p></form><button class="text-button" id="scanCodeButton" type="button">Quét mã QR ghép nối</button><div class="scan-panel" id="scanPanel" hidden><video id="scanVideo" autoplay playsinline muted aria-label="Máy quét QR"></video><p id="scanMessage" role="status"></p><button class="button secondary" id="closeScannerButton" type="button">Đóng camera</button></div></details>
-            <div class="send-footer"><div class="target-stamp" id="targetStamp"><span>GỬI ĐẾN</span><strong>Chưa chọn thiết bị</strong></div><button class="button send-button" id="sendButton" type="button" disabled><span>Chọn máy tính nhận</span><span aria-hidden="true">↑</span></button></div>
+            <div class="section-heading">
+              <div>
+                <h2 id="computerTitle">Thiết bị nhận</h2>
+                <p id="transferSubtitle">Chọn máy tính trong mạng để gửi tệp trực tiếp.</p>
+              </div>
+              <div class="discovery-state" role="status">
+                <span class="signal-lamp" id="discoveryLamp"></span>
+                <span id="discoveryText">Đang tìm</span>
+              </div>
+            </div>
+
+            <div id="deviceList" class="device-list" aria-live="polite">
+              <div class="skeleton-row" aria-hidden="true"><i></i><span></span></div>
+              <div class="skeleton-row" aria-hidden="true"><i></i><span></span></div>
+            </div>
+
+            <details class="pairing-options" id="pairingOptions">
+              <summary>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
+                  <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+                </svg>
+                <span>Ghép nối bằng mã bảo mật hoặc quét QR</span>
+              </summary>
+              <div class="pairing-content">
+                <form id="pairForm" class="code-form">
+                  <label for="pairingCode">Mã ghép nối (8 ký tự)</label>
+                  <div class="code-entry">
+                    <input id="pairingCode" name="code" autocomplete="one-time-code" maxlength="8" spellcheck="false" placeholder="ABCD2345" required>
+                    <button class="button secondary" type="submit">Kết nối</button>
+                  </div>
+                  <p class="field-message" id="pairMessage" role="status">Nhập mã hiển thị trên máy tính bạn muốn kết nối.</p>
+                </form>
+
+                <div class="scan-wrapper">
+                  <button class="button ghost" id="scanCodeButton" type="button">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                      <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/>
+                      <circle cx="12" cy="13" r="4"/>
+                    </svg>
+                    <span>Quét mã QR qua Camera</span>
+                  </button>
+                  <div class="scan-panel" id="scanPanel" hidden>
+                    <video id="scanVideo" autoplay playsinline muted aria-label="Máy quét QR"></video>
+                    <p id="scanMessage" role="status"></p>
+                    <button class="button secondary" id="closeScannerButton" type="button">Đóng camera</button>
+                  </div>
+                </div>
+              </div>
+            </details>
+
+            <div class="send-footer">
+              <div class="target-stamp" id="targetStamp">
+                <span class="meta-label">GỬI ĐẾN</span>
+                <strong>Chưa chọn thiết bị</strong>
+              </div>
+              <button class="button send-button" id="sendButton" type="button" disabled>
+                <span>Chọn máy tính nhận</span>
+                <span aria-hidden="true">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                    <line x1="5" y1="12" x2="19" y2="12"/>
+                    <polyline points="12 5 19 12 12 19"/>
+                  </svg>
+                </span>
+              </button>
+            </div>
           </section>
         </section>
 
+        <!-- ACTIVITY / HISTORY VIEW -->
         <section class="view" id="activityView" aria-labelledby="activityTitle" hidden>
-          <div class="view-heading"><span class="eyebrow">HOẠT ĐỘNG</span><h1 id="activityTitle">Lịch sử truyền tệp</h1><p>Mọi lượt gửi và nhận trên thiết bị này.</p></div>
-          <section class="activity" aria-label="Lịch sử truyền tệp"><div class="history-toolbar"><div class="history-filters" role="group" aria-label="Lọc lịch sử"><button class="filter-button is-active" type="button" data-history-filter="all" aria-pressed="true">Tất cả</button><button class="filter-button" type="button" data-history-filter="sent" aria-pressed="false">Đã gửi</button><button class="filter-button" type="button" data-history-filter="received" aria-pressed="false">Đã nhận</button></div><details class="settings-control"><summary>Thư mục lưu tệp nhận</summary><form id="settingsForm"><label for="destinationInput">Đường dẫn trên máy này</label><div><input id="destinationInput" name="destination" required><button class="button secondary" type="submit">Lưu</button></div><p class="field-message" id="settingsMessage" role="status"></p></form></details></div><div id="historyList" class="history-list" aria-live="polite"><p class="empty-message">Chưa có lượt truyền tệp nào.</p></div></section>
-          <p class="fingerprint">Mã nhận dạng máy này: <code id="fingerprint">Đang tải</code></p>
+          <div class="view-header">
+            <div>
+              <h1 id="activityTitle">Lịch sử truyền tệp</h1>
+              <p class="view-subtitle">Chi tiết mọi lượt gửi và nhận tệp trực tiếp trên máy này.</p>
+            </div>
+          </div>
+
+          <section class="activity" aria-label="Lịch sử truyền tệp">
+            <div class="history-toolbar">
+              <div class="history-filters" role="group" aria-label="Lọc lịch sử">
+                <button class="filter-button is-active" type="button" data-history-filter="all" aria-pressed="true">Tất cả</button>
+                <button class="filter-button" type="button" data-history-filter="sent" aria-pressed="false">Đã gửi</button>
+                <button class="filter-button" type="button" data-history-filter="received" aria-pressed="false">Đã nhận</button>
+              </div>
+
+              <details class="settings-control">
+                <summary>
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <circle cx="12" cy="12" r="3"/>
+                    <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+                  </svg>
+                  <span>Thư mục lưu tệp nhận</span>
+                </summary>
+                <form id="settingsForm" class="settings-popover">
+                  <div class="popover-header">
+                    <strong>Đổi thư mục nhận tệp</strong>
+                    <p>Tệp nhận về máy tính sẽ tự động lưu vào thư mục này.</p>
+                  </div>
+                  <label for="destinationInput" class="visually-hidden">Đường dẫn thư mục</label>
+                  <div class="popover-field">
+                    <input id="destinationInput" name="destination" placeholder="C:\Users\...\Downloads\Relay" required>
+                    <button class="button primary" type="submit">Lưu</button>
+                  </div>
+                  <p class="field-message" id="settingsMessage" role="status"></p>
+                </form>
+              </details>
+            </div>
+
+            <div id="historyList" class="history-list" aria-live="polite">
+              <div class="empty-state">
+                <div class="empty-icon" aria-hidden="true">
+                  <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+                    <circle cx="12" cy="12" r="10"/>
+                    <polyline points="12 6 12 12 16 14"/>
+                  </svg>
+                </div>
+                <p class="empty-message">Chưa có lượt truyền tệp nào.</p>
+              </div>
+            </div>
+          </section>
+
+          <footer class="system-footer">
+            <p class="fingerprint">
+              <span>Mã bảo mật máy này:</span>
+              <code id="fingerprint">Đang tải…</code>
+            </p>
+          </footer>
         </section>
       </main>
     </div>
   </div>
 
-  <div class="modal-backdrop" id="phoneInvite" hidden><section class="qr-dialog" role="dialog" aria-modal="true" aria-labelledby="phoneDialogTitle"><button class="modal-close" id="closePhoneInviteButton" type="button" aria-label="Đóng">×</button><span class="dialog-kicker">KẾT NỐI ĐIỆN THOẠI</span><h2 id="phoneDialogTitle">Quét mã để kết nối</h2><p>Dùng camera điện thoại quét mã. Liên kết dùng một lần và hết hạn sau 10 phút.</p><img id="phoneInviteQr" alt="Mã QR kết nối điện thoại" width="184" height="184"><a id="phoneInviteLink" href="#" rel="noreferrer"></a></section></div>
-  <div class="modal-backdrop" id="pairingTicket" hidden><section class="qr-dialog" role="dialog" aria-modal="true" aria-labelledby="pairDialogTitle"><button class="modal-close" id="closePairingTicketButton" type="button" aria-label="Đóng">×</button><span class="dialog-kicker">GHÉP NỐI MÁY TÍNH</span><h2 id="pairDialogTitle">Chia sẻ mã này</h2><p>Nhập mã hoặc quét QR trên máy tính muốn gửi tệp.</p><img id="pairingQr" src="/static/relay-mark.svg" alt="Mã QR ghép nối" width="184" height="184"><strong class="ticket-code" id="ticketCode"></strong><span class="ticket-countdown" id="ticketCountdown"></span><button class="text-button" id="newCodeButton" type="button">Tạo mã mới</button></section></div>
+  <!-- QR DIALOG FOR PHONE CONNECTION -->
+  <div class="modal-backdrop" id="phoneInvite" hidden>
+    <section class="qr-dialog" role="dialog" aria-modal="true" aria-labelledby="phoneDialogTitle">
+      <button class="modal-close" id="closePhoneInviteButton" type="button" aria-label="Đóng hộp thoại">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <line x1="18" y1="6" x2="6" y2="18"/>
+          <line x1="6" y1="6" x2="18" y2="18"/>
+        </svg>
+      </button>
+      <div class="dialog-badge">KẾT NỐI ĐIỆN THOẠI</div>
+      <h2 id="phoneDialogTitle">Quét mã để kết nối</h2>
+      <p class="dialog-desc">Dùng camera điện thoại quét mã QR bên dưới. Liên kết dùng một lần và tự động hết hạn sau 10 phút.</p>
+      <div class="qr-frame">
+        <img id="phoneInviteQr" alt="Mã QR kết nối điện thoại" width="184" height="184">
+      </div>
+      <a id="phoneInviteLink" href="#" rel="noreferrer" class="qr-link"></a>
+    </section>
+  </div>
+
+  <!-- PAIRING CODE / QR TICKET DIALOG FOR COMPUTER -->
+  <div class="modal-backdrop" id="pairingTicket" hidden>
+    <section class="qr-dialog" role="dialog" aria-modal="true" aria-labelledby="pairDialogTitle">
+      <button class="modal-close" id="closePairingTicketButton" type="button" aria-label="Đóng hộp thoại">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <line x1="18" y1="6" x2="6" y2="18"/>
+          <line x1="6" y1="6" x2="18" y2="18"/>
+        </svg>
+      </button>
+      <div class="dialog-badge">GHÉP NỐI MÁY TÍNH</div>
+      <h2 id="pairDialogTitle">Chia sẻ mã này</h2>
+      <p class="dialog-desc">Nhập mã hoặc quét QR trên máy tính bạn muốn kết nối trong cùng mạng.</p>
+      <div class="qr-frame">
+        <img id="pairingQr" src="/static/relay-mark.svg" alt="Mã QR ghép nối" width="184" height="184">
+      </div>
+      <strong class="ticket-code" id="ticketCode"></strong>
+      <span class="ticket-countdown" id="ticketCountdown"></span>
+      <button class="button secondary" id="newCodeButton" type="button">Tạo mã mới</button>
+    </section>
+  </div>
+
+  <!-- TOAST NOTIFICATION -->
   <div class="toast" id="toast" role="alert" hidden></div>
 </body>
 </html>

@@ -3,40 +3,95 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="theme-color" content="#f5f8ff">
+  <meta name="theme-color" content="#f8fafc">
   <meta name="relay-phone-token" content="{{ phone_token }}">
   <title>Relay — Điện thoại</title>
+  <link rel="icon" type="image/svg+xml" href="/static/relay-mark.svg">
   <link rel="stylesheet" href="/static/phone.css?v={{ static_version }}">
   <script src="/static/phone.js?v={{ static_version }}" defer></script>
 </head>
 <body>
   <header class="phone-header">
-    <div class="brand"><span class="brand-mark" aria-hidden="true">↗</span>Relay</div>
-    <div class="device-label"><span class="status-dot" aria-hidden="true"></span>Đã kết nối với <strong>{{ device_name }}</strong></div>
+    <div class="brand">
+      <span class="brand-mark" aria-hidden="true">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M7 17l9.2-9.2M17 17V8H8"/>
+        </svg>
+      </span>
+      <span>Relay</span>
+    </div>
+    <div class="device-label">
+      <span class="status-dot" aria-hidden="true"></span>
+      <span>Đã kết nối với <strong>{{ device_name }}</strong></span>
+    </div>
   </header>
 
   <main>
-    <div class="intro"><h1>Chia sẻ tệp</h1><p>Gửi và nhận với {{ device_name }} qua mạng Wi-Fi.</p></div>
+    <div class="intro">
+      <h1>Chia sẻ tệp</h1>
+      <p>Truyền tệp trực tiếp với {{ device_name }} qua mạng Wi-Fi.</p>
+    </div>
+
     <nav class="phone-nav" aria-label="Chọn thao tác">
-      <button class="phone-tab is-active" type="button" data-phone-view="send" aria-current="page">↑ Gửi lên máy tính</button>
-      <button class="phone-tab" type="button" data-phone-view="receive">↓ Tải về điện thoại</button>
+      <button class="phone-tab is-active" type="button" data-phone-view="send" aria-current="page">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+          <polyline points="17 8 12 3 7 8"/>
+          <line x1="12" y1="3" x2="12" y2="15"/>
+        </svg>
+        <span>Gửi lên máy tính</span>
+      </button>
+      <button class="phone-tab" type="button" data-phone-view="receive">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+          <polyline points="7 10 12 15 17 10"/>
+          <line x1="12" y1="15" x2="12" y2="3"/>
+        </svg>
+        <span>Tải về điện thoại</span>
+      </button>
     </nav>
 
+    <!-- Send from Phone to PC View -->
     <section class="card phone-view" id="phoneSendView" aria-labelledby="sendTitle">
-      <h2 id="sendTitle">Gửi tệp</h2>
-      <p>Chọn ảnh hoặc tệp từ điện thoại.</p>
-      <label for="phoneFiles">Tệp muốn gửi</label>
-      <input id="phoneFiles" type="file" multiple>
+      <div class="card-header">
+        <h2 id="sendTitle">Gửi tệp lên máy tính</h2>
+        <p>Chọn ảnh, video hoặc tài liệu từ điện thoại của bạn.</p>
+      </div>
+
+      <div class="picker-wrapper">
+        <label for="phoneFiles" class="visually-hidden">Tệp muốn gửi</label>
+        <input id="phoneFiles" type="file" multiple>
+      </div>
+
       <p class="selection" id="selection" role="status">Chưa chọn tệp.</p>
       <button class="primary" id="uploadButton" type="button" disabled>Gửi đến máy tính</button>
       <progress id="uploadProgress" max="100" value="0" hidden></progress>
       <p class="feedback" id="uploadStatus" role="status" aria-live="polite"></p>
-      <details class="history-disclosure"><summary>Tệp đã gửi trong lần kết nối này</summary><ul class="uploaded-list" id="uploadedList"></ul></details>
+
+      <details class="history-disclosure">
+        <summary>Tệp đã gửi trong lần kết nối này</summary>
+        <ul class="uploaded-list" id="uploadedList"></ul>
+      </details>
     </section>
 
+    <!-- Receive from PC on Phone View -->
     <section class="card phone-view" id="phoneReceiveView" aria-labelledby="receiveTitle" hidden>
-      <div class="receive-heading"><div><h2 id="receiveTitle">Tải tệp về</h2><p>Chọn tệp trên máy tính để chúng xuất hiện ở đây.</p></div><button class="secondary" id="refreshButton" type="button">Làm mới</button></div>
-      <ul class="download-list" id="downloadList"><li>Chưa có tệp để tải.</li></ul>
+      <div class="receive-heading">
+        <div>
+          <h2 id="receiveTitle">Tải tệp về điện thoại</h2>
+          <p>Tệp được chọn trên máy tính sẽ hiển thị tại đây để bạn tải về.</p>
+        </div>
+        <button class="secondary" id="refreshButton" type="button">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <polyline points="23 4 23 10 17 10"/>
+            <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/>
+          </svg>
+          <span>Làm mới</span>
+        </button>
+      </div>
+      <ul class="download-list" id="downloadList">
+        <li>Chưa có tệp để tải.</li>
+      </ul>
     </section>
 
     <p class="connection-status" id="connectionStatus" role="status">Đang kiểm tra kết nối…</p>

@@ -29,6 +29,10 @@ const elements = {
     send: document.querySelector("#sendView"),
     activity: document.querySelector("#activityView"),
   },
+  systemStatusPill: document.querySelector("#systemStatusPill"),
+  systemStatusText: document.querySelector("#systemStatusText"),
+  receiveSubtitle: document.querySelector("#receiveSubtitle"),
+  deviceNetwork: document.querySelector("#deviceNetwork"),
   deviceName: document.querySelector("#deviceName"),
   deviceAddress: document.querySelector("#deviceAddress"),
   discoveryText: document.querySelector("#discoveryText"),
@@ -188,12 +192,35 @@ function renderStatus() {
   if (!state.status) return;
   const { device, addresses, destination } = state.status;
   elements.deviceName.textContent = device.name;
-  elements.deviceAddress.textContent = addresses.find((address) => !address.startsWith("127.")) || "Máy này";
+  const lanAddress = addresses.find((address) => !address.startsWith("127."));
+  elements.deviceAddress.textContent = lanAddress || "127.0.0.1";
   elements.fingerprint.textContent = device.fingerprint;
   if (document.activeElement !== elements.destinationInput) elements.destinationInput.value = destination;
   const hasDevices = state.devices.length > 0;
   elements.discoveryText.textContent = hasDevices ? `${state.devices.length} máy gần đây` : "Đang tìm";
   elements.discoveryLamp.style.background = hasDevices ? "var(--green)" : "var(--blue)";
+
+  // Trạng thái kết nối chung ở góc trên phải
+  if (elements.systemStatusPill) elements.systemStatusPill.classList.remove("is-offline");
+  if (elements.systemStatusText) elements.systemStatusText.textContent = "Trực tuyến";
+
+  // Thông tin mạng trong chi tiết kết nối của thiết bị
+  if (elements.deviceNetwork) {
+    elements.deviceNetwork.textContent = lanAddress ? "Mạng cục bộ (LAN)" : "Chỉ cục bộ (Loopback)";
+    elements.deviceNetwork.classList.toggle("is-warning", !lanAddress);
+  }
+
+  // Trạng thái nhận tệp tích hợp vào dòng mô tả dưới tiêu đề "Nhận tệp"
+  if (elements.receiveSubtitle) {
+    if (lanAddress) {
+      elements.receiveSubtitle.textContent = "Sẵn sàng nhận tệp từ các máy tính và điện thoại trong cùng mạng.";
+      elements.receiveSubtitle.classList.remove("is-warning", "is-error");
+    } else {
+      elements.receiveSubtitle.textContent = "Chưa kết nối Wi-Fi hoặc mạng LAN. Cần kết nối mạng để nhận tệp từ thiết bị khác.";
+      elements.receiveSubtitle.classList.add("is-warning");
+      elements.receiveSubtitle.classList.remove("is-error");
+    }
+  }
 }
 
 function renderPhoneConnection() {
@@ -928,6 +955,13 @@ async function pollState() {
     await refresh();
   } catch (error) {
     setPairMessage(error.message, true);
+    if (elements.systemStatusPill) elements.systemStatusPill.classList.add("is-offline");
+    if (elements.systemStatusText) elements.systemStatusText.textContent = "Mất kết nối";
+    if (elements.receiveSubtitle) {
+      elements.receiveSubtitle.textContent = "Không thể kết nối đến máy chủ Relay. Vui lòng kiểm tra ứng dụng Relay trên máy tính.";
+      elements.receiveSubtitle.classList.add("is-error");
+      elements.receiveSubtitle.classList.remove("is-warning");
+    }
   }
   window.clearTimeout(refreshTimer);
   const hasActiveTransfer = state.outgoing.some((transfer) => ["preparing", "sending"].includes(transfer.status))
@@ -941,6 +975,15 @@ document.addEventListener("visibilitychange", () => {
   pollState();
 });
 window.addEventListener("online", pollState);
+window.addEventListener("offline", () => {
+  if (elements.systemStatusPill) elements.systemStatusPill.classList.add("is-offline");
+  if (elements.systemStatusText) elements.systemStatusText.textContent = "Ngoại tuyến";
+  if (elements.receiveSubtitle) {
+    elements.receiveSubtitle.textContent = "Thiết bị đang ngoại tuyến. Vui lòng kết nối mạng Wi-Fi hoặc mạng LAN để nhận tệp.";
+    elements.receiveSubtitle.classList.add("is-warning");
+    elements.receiveSubtitle.classList.remove("is-error");
+  }
+});
 window.setInterval(renderTicket, 1000);
 updateNotificationButton();
 showView("receive");

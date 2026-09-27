@@ -4,30 +4,64 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{{ filename }} — Relay</title>
+  <link rel="icon" type="image/svg+xml" href="/static/relay-mark.svg">
   <link rel="stylesheet" href="/static/preview.css">
 </head>
 <body>
-  <main>
-    <p class="brand">Relay</p>
-    <h1>{{ filename }}</h1>
-    {% if kind == "image" %}
-    <img class="preview" src="{{ file_url }}" alt="{{ filename }}">
-    {% elif kind == "video" %}
-    <video class="preview" controls preload="metadata" src="{{ file_url }}">Trình duyệt không hỗ trợ phát video này.</video>
-    {% elif kind == "audio" %}
-    <audio class="preview" controls preload="metadata" src="{{ file_url }}">Trình duyệt không hỗ trợ phát âm thanh này.</audio>
-    {% elif kind == "text" %}
-    <pre class="preview-text">{{ preview_text }}</pre>
-    {% if truncated %}<p>Chỉ hiển thị phần đầu của tệp. Tải về để xem toàn bộ.</p>{% endif %}
-    {% elif kind == "pdf" %}
-    <p>Chọn “Xem PDF” để mở trong trình duyệt, hoặc tải về để mở bằng ứng dụng trên máy.</p>
-    {% else %}
-    <p>Trình duyệt không xem trước được loại tệp này. Bạn có thể tải tệp về để mở bằng ứng dụng trên máy.</p>
-    {% endif %}
-    <div class="actions">
-      {% if kind == "pdf" %}<a href="{{ file_url }}" target="_blank" rel="noopener noreferrer">Xem PDF</a>{% endif %}
-      <a href="{{ file_url }}?download=1">Tải tệp về</a>
-      <a class="secondary" href="/">Quay lại Relay</a>
+  <header class="preview-header">
+    <a class="preview-brand" href="/" aria-label="Relay, trang chủ">
+      <span class="preview-brand-mark" aria-hidden="true">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M7 17l9.2-9.2M17 17V8H8"/>
+        </svg>
+      </span>
+      <span>Relay</span>
+    </a>
+    <span class="preview-mode-tag">Xem trước tệp</span>
+  </header>
+
+  <main class="preview-main">
+    <div class="preview-title-bar">
+      <div class="preview-file-info">
+        <h1>{{ filename }}</h1>
+        <p class="preview-help-text">Tệp được lưu an toàn trong thư mục nhận của máy này.</p>
+      </div>
+      <div class="actions">
+        {% if kind == "pdf" %}
+        <a class="button primary" href="{{ file_url }}" target="_blank" rel="noopener noreferrer">Xem toàn màn hình</a>
+        {% endif %}
+        <a class="button primary" href="{{ file_url }}?download=1">Tải tệp về</a>
+        <a class="button secondary" href="/">Quay lại Relay</a>
+      </div>
+    </div>
+
+    <div class="preview-stage">
+      {% if kind == "image" %}
+      <div class="image-wrapper">
+        <img class="preview" src="{{ file_url }}" alt="{{ filename }}">
+      </div>
+      {% elif kind == "video" %}
+      <div class="media-wrapper">
+        <video class="preview" controls preload="metadata" src="{{ file_url }}">Trình duyệt không hỗ trợ phát video này.</video>
+      </div>
+      {% elif kind == "audio" %}
+      <div class="audio-wrapper">
+        <audio class="preview" controls preload="metadata" src="{{ file_url }}">Trình duyệt không hỗ trợ phát âm thanh này.</audio>
+      </div>
+      {% elif kind == "text" %}
+      <div class="text-wrapper">
+        <pre class="preview-text">{{ preview_text }}</pre>
+        {% if truncated %}<p class="notice">Chỉ hiển thị phần đầu của tệp. Tải về để xem toàn bộ nội dung.</p>{% endif %}
+      </div>
+      {% elif kind == "pdf" %}
+      <div class="placeholder-wrapper">
+        <p>Chọn “Xem toàn màn hình” để mở PDF trong trình duyệt, hoặc tải về để mở bằng ứng dụng trên máy.</p>
+      </div>
+      {% else %}
+      <div class="placeholder-wrapper">
+        <p>Trình duyệt không hỗ trợ xem trước loại tệp này. Vui lòng tải tệp về để mở bằng ứng dụng tương thích trên máy.</p>
+      </div>
+      {% endif %}
     </div>
   </main>
 </body>

@@ -3,20 +3,35 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="theme-color" content="#f5f8ff">
+  <meta name="theme-color" content="#f8fafc">
   <title>Relay — Kết nối điện thoại</title>
+  <link rel="icon" type="image/svg+xml" href="/static/relay-mark.svg">
   <link rel="stylesheet" href="/static/phone.css?v={{ static_version }}">
 </head>
 <body>
-  <header class="phone-header"><div class="brand"><span class="brand-mark" aria-hidden="true">↗</span>Relay</div></header>
+  <header class="phone-header">
+    <div class="brand">
+      <span class="brand-mark" aria-hidden="true">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M7 17l9.2-9.2M17 17V8H8"/>
+        </svg>
+      </span>
+      <span>Relay</span>
+    </div>
+  </header>
   <main class="connect-page">
-    <div class="connect-symbol" aria-hidden="true">↕</div>
+    <div class="connect-symbol" aria-hidden="true">
+      <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <rect x="5" y="2" width="14" height="20" rx="2" ry="2"/>
+        <line x1="12" y1="18" x2="12.01" y2="18"/>
+      </svg>
+    </div>
     <h1>Kết nối với {{ device_name }}</h1>
-    <p>Kiểm tra đây là máy tính của bạn và hai thiết bị dùng chung Wi-Fi.</p>
+    <p>Xác nhận ghép nối thiết bị. Đảm bảo điện thoại và máy tính đang dùng chung một mạng Wi-Fi.</p>
     <form class="card connect-card" action="/phone/connect" method="post">
       <input type="hidden" name="invite" value="{{ invite }}">
       <button class="primary" type="submit">Kết nối với Relay</button>
-      <span>Bạn có thể gửi ảnh lên máy tính và tải tệp về điện thoại. Kết nối hết hạn sau một giờ.</span>
+      <span>Bạn có thể gửi ảnh, video lên máy tính và tải tệp về điện thoại trực tiếp. Phiên kết nối có hiệu lực trong 1 giờ.</span>
     </form>
   </main>
 </body>
