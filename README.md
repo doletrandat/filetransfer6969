@@ -1,122 +1,100 @@
 # Relay — truyền tệp trực tiếp trong mạng nội bộ
 
-Relay là ứng dụng Python có giao diện web, cho phép chuyển tệp giữa hai máy Windows hoặc giữa một máy Windows và điện thoại trong cùng mạng Wi-Fi/Ethernet. Máy Windows chạy dịch vụ Relay; điện thoại chỉ cần trình duyệt. Dữ liệu đi qua kết nối HTTPS trong mạng nội bộ, không cần tài khoản, máy chủ đám mây hoặc Internet trong lúc truyền.
+**Relay** giúp gửi tệp giữa hai máy Windows hoặc giữa máy Windows và điện thoại trong cùng mạng Wi-Fi/Ethernet. Hai máy tính chạy Relay có thể tìm và ghép nối với nhau; điện thoại chỉ cần trình duyệt và mã QR. Tệp đi trực tiếp qua mạng nội bộ bằng HTTPS, không cần tài khoản hay dịch vụ đám mây.
 
-## Thông tin dự án
+> **Phạm vi:** máy chạy Relay cần Windows và Python 3.11 trở lên. Android/iPhone dùng trình duyệt để kết nối với một máy Windows đang chạy Relay.
 
-| Nội dung | Mô tả |
-| --- | --- |
-| Bài toán | Chuyển tệp và thư mục giữa các máy trong cùng mạng nội bộ, đồng thời theo dõi tiến độ và kiểm tra tệp sau khi nhận. |
-| Đầu vào | Tệp/thư mục được chọn trên máy Windows hoặc tệp được chọn trên điện thoại; thiết bị nhận và mã ghép đôi/liên kết QR tương ứng. |
-| Đầu ra | Tệp trong thư mục nhận của máy Windows hoặc tệp do trình duyệt điện thoại tải về; trạng thái và tiến độ trên giao diện tương ứng. |
-| Nền tảng | Máy chạy Relay: Windows và Python 3.11 trở lên. Máy truy cập: trình duyệt trên Windows, Android hoặc iPhone. |
-| Dữ liệu huấn luyện | Không áp dụng. Dự án không sử dụng mô hình học máy. |
+## Giao diện
 
-## Chạy nhanh
+Ba màn hình chính trên máy tính:
 
-Chạy các lệnh sau trên **mỗi máy Windows tham gia truyền tệp**. Nếu dùng điện thoại, chỉ cần chạy Relay trên máy Windows; điện thoại không cần cài Python. Mở PowerShell tại thư mục chứa dự án:
+### Nhận tệp
+
+Xem tên và địa chỉ IP nội bộ của máy, tạo mã ghép nối cho máy tính khác, hiện QR cho điện thoại và mở tệp vừa nhận.
+
+![Màn hình Nhận của Relay trên máy tính, gồm thông tin thiết bị, ghép nối và tệp nhận gần đây](docs/screenshots/desktop_01_receive.png)
+
+### Gửi tệp
+
+Kéo thả hoặc chọn tệp/thư mục, chọn máy nhận đã ghép nối rồi theo dõi quá trình gửi.
+
+![Màn hình Gửi của Relay trên máy tính, gồm vùng chọn tệp và danh sách thiết bị nhận](docs/screenshots/desktop_03_send.png)
+
+### Lịch sử
+
+Lọc các lượt đã gửi/đã nhận, xem trạng thái, mở tệp hoàn tất và đổi thư mục lưu tệp nhận.
+
+![Màn hình Lịch sử của Relay trên máy tính, hiển thị các tệp đã nhận và trạng thái hoàn tất](docs/screenshots/desktop_04_history.png)
+
+<details>
+<summary><strong>Xem bố cục khi cửa sổ trình duyệt hẹp</strong></summary>
+
+| Nhận | Gửi | Lịch sử |
+| :---: | :---: | :---: |
+| <img src="docs/screenshots/mobile_01_receive.png" alt="Bố cục màn Nhận trên cửa sổ hẹp" width="240"> | <img src="docs/screenshots/mobile_02_send.png" alt="Bố cục màn Gửi trên cửa sổ hẹp" width="240"> | <img src="docs/screenshots/mobile_03_history.png" alt="Bố cục màn Lịch sử trên cửa sổ hẹp" width="240"> |
+
+Các ảnh này minh họa cách **giao diện quản lý Relay** co giãn theo chiều rộng cửa sổ. Trang kết nối dành riêng cho điện thoại có luồng gửi/tải tệp riêng.
+
+</details>
+
+## Cài đặt và chạy
+
+Mở PowerShell trong thư mục dự án. Thực hiện trên **mỗi máy Windows** muốn tham gia truyền tệp:
 
 ```powershell
-py -3.11 --version
 py -3.11 -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -e .
 .\.venv\Scripts\python.exe -m relay
 ```
 
-Nếu dùng Python 3.12 trở lên, thay `-3.11` ở hai dòng đầu bằng phiên bản tương ứng. Nếu máy không có lệnh `py`, dùng `python --version` để kiểm tra phiên bản từ **3.11** trở lên và thay lệnh tạo môi trường bằng `python -m venv .venv`.
+Yêu cầu Python **3.11 trở lên**. Nếu dùng phiên bản khác, đổi `-3.11` tương ứng; nếu không có lệnh `py`, dùng `python -m venv .venv`. Điện thoại không cần cài Relay hay Python.
 
-Relay tự mở giao diện tại `https://127.0.0.1:8765`. Nếu cổng này bận, địa chỉ thực tế sẽ được in trong PowerShell; chương trình thử tối đa 19 cổng tiếp theo. Giữ cửa sổ PowerShell mở trong lúc sử dụng và nhấn `Ctrl+C` để dừng.
+Relay tự mở `https://127.0.0.1:8765` trên máy đang chạy. Nếu cổng 8765 bận, xem địa chỉ thực tế trong PowerShell. Giữ cửa sổ PowerShell mở khi sử dụng; nhấn `Ctrl+C` để dừng. Nếu Windows Firewall hỏi, cho phép Relay trên mạng **Private**.
 
-Cấu hình, chứng chỉ cục bộ và trạng thái truyền được lưu trong `%LOCALAPPDATA%\Relay`. Tệp nhận mặc định nằm ở `%USERPROFILE%\Downloads\Relay` và có thể đổi trên giao diện.
+Chứng chỉ HTTPS được tạo trên từng máy. Trình duyệt có thể cảnh báo ở lần đầu mở; chỉ tiếp tục sau khi kiểm tra đúng địa chỉ của máy mình. Trang quản lý chỉ truy cập từ chính máy chạy Relay tại `localhost`.
 
-> **Lưu ý HTTPS:** Relay tự tạo chứng chỉ cho từng máy nên trình duyệt có thể cảnh báo ở lần mở đầu tiên. Trên máy tính, chỉ tiếp tục khi địa chỉ là `https://127.0.0.1:<cổng>` và chính bạn vừa chạy Relay. Trang điện thoại dùng địa chỉ IP nội bộ được tạo bằng nút **Tạo mã QR cho điện thoại**; chỉ tiếp tục sau khi kiểm tra IP đó là máy tính của mình. Giao diện quản lý máy tính vẫn chỉ truy cập được tại `localhost`.
+## Cách sử dụng
 
-## Chức năng chính
+### Giữa hai máy Windows
 
-- **Tìm thiết bị:** quảng bá và phát hiện máy chạy Relay trong cùng mạng bằng Zeroconf/mDNS.
-- **Ghép đôi:** máy nhận tạo mã 8 ký tự hoặc mã QR; mã có hiệu lực 10 phút và chỉ dùng một lần.
-- **Chọn dữ liệu:** chọn nhiều tệp, chọn thư mục hoặc kéo thả tệp vào giao diện. Các tệp được đưa vào hàng chờ trên máy gửi trước khi truyền.
-- **Truyền và theo dõi giữa hai máy Windows:** gửi tệp theo từng khối qua HTTPS; hiển thị tiến độ, tốc độ và trạng thái ở mục **Đã gửi** và **Đã nhận**.
-- **Kiểm tra dữ liệu giữa hai máy Windows:** so sánh SHA-256 sau khi nhận; chỉ hoàn tất tệp khi kích thước và mã băm khớp với thông tin gửi đi.
-- **Xử lý gián đoạn:** thử lại khối truyền khi có lỗi mạng; lưu trạng thái và dữ liệu đã đưa vào hàng chờ để người gửi có thể tiếp tục sau khi khởi động lại.
-- **Tránh trùng tên:** lưu tệp trực tiếp trong thư mục nhận, giữ cấu trúc thư mục do người gửi chọn; tệp khác nội dung nhưng trùng tên được thêm hậu tố, tệp giống hệt được dùng lại.
-- **Kết nối điện thoại:** tạo liên kết QR dùng một lần để điện thoại gửi tệp vào máy Windows hoặc mở/tải tệp trong hàng chờ. Tệp điện thoại gửi lên được lưu chung trong thư mục `From phone` và có thể mở từ giao diện máy tính.
+1. Kết nối hai máy vào cùng mạng và chạy Relay trên cả hai.
+2. Trên máy **nhận**, vào **Nhận** → **Tạo mã** để lấy mã ghép nối dùng một lần.
+3. Trên máy **gửi**, vào **Gửi** → **Ghép nối bằng mã bảo mật hoặc quét QR**. Nhập mã hoặc quét QR, sau đó chọn máy nhận.
+4. Chọn **Chọn tệp**, **Chọn thư mục** hoặc kéo thả tệp vào vùng chọn. Khi danh sách tệp đã chuẩn bị hiện ra, bắt đầu gửi tới máy đã chọn.
+5. Xem tiến độ và kết quả trong **Lịch sử** trên hai máy. Tệp nhận mặc định ở `%USERPROFILE%\Downloads\Relay`; có thể đổi tại **Lịch sử → Thư mục lưu tệp nhận**.
 
-## Công nghệ sử dụng
+Relay dùng Zeroconf/mDNS để tìm máy trong mạng. Nếu không thấy máy nhận, kiểm tra hai máy cùng mạng, cấu hình mạng Windows là **Private** và quyền Firewall. Mã QR của máy tính chứa địa chỉ thiết bị, nên vẫn có thể ghép nối trực tiếp khi mDNS bị chặn nhưng hai máy còn kết nối được với nhau.
 
-| Thành phần | Công nghệ | Vai trò |
-| --- | --- | --- |
-| Dịch vụ và API | Python, FastAPI, Uvicorn | Cung cấp giao diện cục bộ và các API ghép đôi, truyền tệp. |
-| Giao diện | HTML, CSS, JavaScript, Jinja2 | Chọn dữ liệu, ghép đôi và theo dõi tiến độ trong trình duyệt. |
-| Khám phá thiết bị | Zeroconf/mDNS | Tìm các máy Relay trong mạng nội bộ. |
-| Kết nối giữa hai máy | HTTPX, HTTPS | Gửi yêu cầu và các khối dữ liệu tới máy nhận. |
-| Bảo mật và mã QR | cryptography, qrcode, Pillow | Tạo chứng chỉ, kiểm tra danh tính thiết bị và tạo mã QR ghép đôi. |
+### Giữa máy Windows và điện thoại
 
-Các thư viện và phiên bản tối thiểu được khai báo trong [`pyproject.toml`](pyproject.toml).
+1. Cho máy tính và điện thoại vào cùng mạng Wi-Fi. Trên máy tính, vào **Nhận** → **Hiện mã QR**.
+2. Quét QR bằng điện thoại, kiểm tra địa chỉ IP trong liên kết là của máy tính mình rồi chọn **Kết nối với Relay**. Liên kết chỉ dùng một lần và hết hạn sau **10 phút**; phiên điện thoại kéo dài tối đa **1 giờ**.
+3. **Điện thoại → máy tính:** trên trang điện thoại, chọn **Gửi lên máy tính**, chọn tệp và gửi. Tệp xuất hiện ở **Tệp nhận gần đây** và **Lịch sử** trên máy tính, trong thư mục `From phone` bên trong nơi lưu tệp nhận.
+4. **Máy tính → điện thoại:** chọn tệp trên màn **Gửi** của máy tính. Trên điện thoại, vào **Tải về điện thoại** để mở hoặc tải tệp đã chuẩn bị. Không cần bấm nút gửi tới một máy tính khác.
+5. Khi xong, chọn **Ngắt kết nối** trên máy tính để thu hồi phiên điện thoại.
 
-## Hướng dẫn sử dụng và kịch bản demo
+Trình duyệt điện thoại quyết định nơi lưu tệp tải xuống. Nếu trang không mở được, kiểm tra hai thiết bị cùng mạng, IP trong QR, Firewall và cảnh báo chứng chỉ HTTPS. Trang điện thoại không cần mDNS.
 
-1. Kết nối hai máy Windows vào cùng mạng Wi-Fi hoặc Ethernet. Nếu Windows Firewall hỏi quyền truy cập, cho phép Relay trên mạng **Private**.
-2. Chạy Relay trên cả hai máy. Kiểm tra tên máy ở màn **Nhận**. Có thể đổi nơi lưu tệp tại **Lịch sử → Thư mục lưu tệp nhận**; mặc định là `Downloads\Relay` trong thư mục người dùng.
-3. Trên máy nhận, chọn **Tạo mã ghép nối**.
-4. Trên máy gửi, vào màn **Gửi**, mở **Kết nối bằng mã hoặc mã QR**, nhập mã 8 ký tự và chọn **Kết nối**. Có thể dùng **Quét mã QR ghép nối** nếu trình duyệt hỗ trợ `BarcodeDetector` và có camera. Sau đó chọn thiết bị đã ghép đôi.
-5. Chọn **Chọn tệp** hoặc **Chọn thư mục**. Đợi các tệp xuất hiện trong **Tệp đã chọn**, rồi chọn **Gửi đến [tên máy]**.
-6. Theo dõi hai cột **Đã gửi** và **Đã nhận** trong **Lịch sử**. Chọn tên tệp đã nhận để mở bằng ứng dụng mặc định trên máy nhận. Gửi lại tệp cùng tên để kiểm tra cách Relay giữ bản trùng mà không tạo thư mục `batch` mới.
-7. Để minh họa khôi phục, bắt đầu gửi một tệp lớn rồi dừng Relay giữa chừng. Khởi chạy lại cả hai bên nếu cần, tạo mã mới trên máy nhận, ghép đôi lại trên máy gửi và chọn **Thử gửi lại**.
-
-Nếu không thấy máy bên kia, kiểm tra hai máy có cùng mạng, mạng Windows đang ở chế độ **Private** và Firewall cho phép kết nối. Mã nhập thủ công cần mDNS để tìm máy nhận. Mã QR có kèm địa chỉ thiết bị, nên có thể ghép đôi khi mDNS bị chặn nhưng hai máy vẫn kết nối trực tiếp được. Nếu trình duyệt không quét được QR, dùng mã thủ công sau khi khắc phục vấn đề tìm thiết bị.
-
-## Dùng với điện thoại
-
-1. Cho máy Windows và điện thoại vào cùng mạng Wi-Fi. Chạy Relay trên máy Windows, cho phép kết nối qua Windows Firewall trên mạng **Private** và mở giao diện `https://127.0.0.1:<cổng>` trên chính máy đó.
-2. Trên màn **Nhận** của máy tính, chọn **Hiện mã QR**. Dùng camera điện thoại quét mã QR hoặc mở liên kết hiện bên dưới mã. Liên kết có hiệu lực **10 phút** và chỉ dùng **một lần**.
-3. Trên điện thoại, kiểm tra địa chỉ IP trong liên kết là IP của máy Windows rồi chọn **Kết nối với Relay**. Máy tính sẽ báo **Điện thoại đã kết nối** ngay cả khi chưa gửi tệp. Phiên kết nối có hiệu lực tối đa **1 giờ**; trạng thái hoạt động sẽ tắt khi trang điện thoại ngừng liên lạc. Nếu trình duyệt cảnh báo chứng chỉ tự tạo, chỉ tiếp tục khi đang kết nối tới đúng máy của mình.
-4. **Điện thoại → máy tính:** chọn tệp/ảnh trong màn **Gửi lên máy tính**, rồi chọn **Gửi đến máy tính**. Trên máy tính, tệp hiện ở **Tệp từ điện thoại** và trong cột **Đã nhận** của **Lịch sử**; chọn **Mở tệp** để mở bằng ứng dụng mặc định của Windows hoặc **Sao chép đường dẫn** để mở bằng File Explorer. Các phiên dùng chung thư mục `From phone`; tệp khác nội dung nhưng trùng tên được thêm hậu tố.
-5. **Máy tính → điện thoại:** chọn tệp bằng **Chọn tệp** trên máy tính và chờ tệp xuất hiện ở **Tệp đã chọn**. Trên điện thoại, vào **Tải về điện thoại**, chọn **Mở** để xem trong trình duyệt hoặc **Tải về** để lưu. Không cần chọn **Gửi đến [tên máy]** cho cách truyền này.
-6. Khi xong, chọn **Ngắt kết nối** trên máy tính để thu hồi phiên. Tạo liên kết mới nếu muốn kết nối lại.
-
-Trang điện thoại chỉ chuyển **từng tệp**. Trình duyệt quyết định nơi lưu tệp tải xuống trên điện thoại. Nếu liên kết không mở được, kiểm tra hai thiết bị cùng mạng, IP trong mã QR và cài đặt Firewall; trang điện thoại không cần mDNS.
-
-## Thiết kế và luồng xử lý
+## Cách Relay hoạt động
 
 ```mermaid
 flowchart LR
-    A[Trình duyệt máy gửi] -->|Chọn tệp| B[Relay máy gửi]
-    B -->|Lưu vào hàng chờ| C[Tệp tạm trên máy gửi]
-    B <-->|Zeroconf/mDNS| D[Relay máy nhận]
-    B -->|HTTPS: ghép đôi và gửi từng khối| D
-    D -->|Kiểm tra SHA-256| E[Thư mục nhận]
-    F[Trình duyệt điện thoại] <-->|HTTPS: gửi và tải tệp| B
+    A[Máy Windows gửi] -->|HTTPS, truyền theo khối| B[Máy Windows nhận]
+    A <-->|Tìm thiết bị qua mDNS, ghép nối bằng mã hoặc QR| B
+    C[Trình duyệt điện thoại] <-->|HTTPS, gửi hoặc tải từng tệp| A
+    B -->|Kiểm tra kích thước và SHA-256| D[Thư mục nhận]
 ```
 
-1. Trình duyệt chuyển tệp đã chọn vào hàng chờ cục bộ của Relay trên máy gửi.
-2. Hai máy tìm thấy nhau qua mDNS hoặc dùng thông tin địa chỉ trong mã QR; người dùng ghép đôi bằng mã dùng một lần.
-3. Máy gửi lập danh sách tệp, kích thước và SHA-256, rồi truyền dữ liệu qua HTTPS theo từng khối.
-4. Máy nhận ghi dữ liệu tạm, xác nhận kích thước và SHA-256, sau đó đưa tệp hoàn chỉnh vào thư mục nhận. Tiến độ được cập nhật trên giao diện hai máy.
+- **Ghép nối:** mã máy tính gồm 8 ký tự, chỉ dùng một lần và hết hạn sau 10 phút. Kết nối HTTPS giữa hai máy được kiểm tra theo fingerprint chứng chỉ đã ghép nối.
+- **Toàn vẹn tệp:** truyền giữa hai máy Windows theo từng khối; chỉ đánh dấu hoàn tất khi kích thước và SHA-256 của tệp nhận khớp. Đường dẫn nhận được kiểm tra để không ghi ra ngoài thư mục đích.
+- **Khôi phục:** Relay lưu trạng thái hàng chờ và phần tệp đã nhận. Sau khi khởi động lại, cần ghép nối lại rồi chọn thử gửi lại; ứng dụng chưa tự tiếp tục phiên gửi.
+- **Quyền truy cập:** giao diện điều khiển chỉ mở trên `localhost`; trang điện thoại yêu cầu liên kết mời và phiên kết nối còn hiệu lực.
 
-| Vị trí trong mã nguồn | Trách nhiệm |
-| --- | --- |
-| `relay/__main__.py` | Khởi động dịch vụ, chọn cổng và mở trình duyệt. |
-| `relay/app.py` | API và giao diện FastAPI; giới hạn thao tác điều khiển vào máy cục bộ. |
-| `relay/discovery.py` | Quảng bá và tìm thiết bị bằng Zeroconf/mDNS. |
-| `relay/security.py`, `relay/network.py` | Mã ghép đôi, phiên kết nối và kiểm tra chứng chỉ theo fingerprint. |
-| `relay/transfers.py` | Hàng chờ, truyền theo khối, kiểm tra SHA-256, thử lại và lưu trạng thái. |
-| `relay/phone.py` | Liên kết QR dùng một lần, phiên điện thoại và xử lý tệp điện thoại gửi lên. |
-| `relay/templates/`, `relay/static/` | Giao diện HTML, CSS và JavaScript. |
-| `tests/` | Kiểm thử tự động cho các thành phần chính. |
-
-## Bảo mật và toàn vẹn dữ liệu
-
-- Giao diện và API điều khiển chỉ nhận truy cập từ `localhost`; thao tác thay đổi dữ liệu cần token của phiên giao diện.
-- Kết nối giữa hai máy sử dụng HTTPS. Relay kiểm tra fingerprint chứng chỉ của thiết bị được ghép đôi trước khi truyền.
-- API nhận tệp yêu cầu phiên ghép đôi còn hiệu lực; mã ghép đôi chỉ dùng một lần và không được trả về cho máy khác trong mạng.
-- Đường dẫn tệp nhận được kiểm tra để không ghi ra ngoài thư mục đích. Với truyền giữa hai máy Windows, tệp chỉ được hoàn tất sau khi SHA-256 khớp.
-- Nút **Mở tệp** trên máy tính chỉ hoạt động từ giao diện cục bộ và dùng ứng dụng mặc định của Windows. Mục lịch sử có tệp đã bị xóa được đánh dấu **Tệp không còn trên máy**. Trên điện thoại, liên kết **Mở** chỉ hoạt động trong phiên đã kết nối; HTML, SVG và mã nguồn được hiển thị như văn bản, còn loại tệp không hỗ trợ xem trước được tải xuống.
-- Trang điện thoại cần liên kết QR dùng một lần; phiên được giữ bằng cookie bảo mật và thao tác tải lên cần thêm token. Người dùng có thể thu hồi phiên từ máy tính.
+Mã nguồn chính nằm trong [`relay/app.py`](relay/app.py) (API và giao diện), [`relay/transfers.py`](relay/transfers.py) (hàng chờ và truyền tệp), [`relay/discovery.py`](relay/discovery.py) (tìm thiết bị), [`relay/security.py`](relay/security.py) (ghép nối) và [`relay/phone.py`](relay/phone.py) (kết nối điện thoại). Các phụ thuộc được khai báo trong [`pyproject.toml`](pyproject.toml).
 
 ## Kiểm thử
 
-Cài thêm công cụ phát triển và chạy bộ kiểm thử:
+Sau khi tạo môi trường ảo, cài công cụ phát triển và chạy:
 
 ```powershell
 .\.venv\Scripts\python.exe -m pip install -e ".[dev]"
@@ -125,18 +103,13 @@ Cài thêm công cụ phát triển và chạy bộ kiểm thử:
 .\.venv\Scripts\python.exe -m mypy relay tests
 ```
 
-Bộ kiểm thử tự động bao gồm kiểm tra đường dẫn an toàn, mã ghép đôi dùng một lần, xử lý gián đoạn và khôi phục truyền tệp, quyền truy cập API, khám phá thiết bị, kết nối điện thoại/tải lên/tải xuống và một kịch bản truyền tệp qua HTTPS trên loopback. Khi bảo vệ bài tập lớn, nên demo trên **hai thiết bị thật** để kiểm tra thêm Firewall, mDNS và kết nối mạng thực tế; bộ kiểm thử trên một máy không thay thế được bước này.
-
-Kết quả kiểm tra trên môi trường hiện tại: **33 bài kiểm thử đạt**, Ruff không báo lỗi và mypy không tìm thấy lỗi trong mã nguồn. Pytest có một cảnh báo về tương thích giữa các thư viện kiểm thử, không làm bài kiểm thử thất bại.
+Bộ kiểm thử bao gồm đường dẫn tệp, ghép nối, truyền và khôi phục, API, khám phá thiết bị và luồng điện thoại. Kiểm thử tự động trên một máy không thay thế việc thử thực tế với hai thiết bị cùng mạng, đặc biệt với Firewall và mDNS.
 
 ## Giới hạn hiện tại
 
-- Sau khi Relay khởi động lại, phiên ghép đôi không được lưu. Người gửi phải ghép đôi lại và chọn **Thử gửi lại**; ứng dụng không tự tiếp tục truyền.
-- Các tệp đã vào hàng chờ hoàn chỉnh được giữ lại. Nếu Relay dừng khi trình duyệt vẫn đang tải một tệp vào hàng chờ, cần chọn lại tệp đó.
-- Khi chọn thư mục, trình duyệt chỉ cung cấp các tệp bên trong; thư mục rỗng không được truyền.
-- Trang điện thoại chỉ gửi/tải tệp riêng lẻ, chưa chuyển cả thư mục hoặc tự đồng bộ. Phiên điện thoại mất khi Relay khởi động lại. Chưa kiểm thử thủ công trên thiết bị Android/iPhone thật.
-- Ứng dụng chưa có bộ cài Windows và chưa chạy nền như dịch vụ hệ thống.
+- Máy chạy dịch vụ Relay được hỗ trợ trên Windows; chưa có bộ cài hoặc chế độ chạy nền.
+- Sau khi khởi động lại, cần ghép nối lại; tệp đang được trình duyệt đưa vào hàng chờ dở dang cần chọn lại.
+- Thư mục rỗng không được truyền. Trang điện thoại chỉ gửi/tải từng tệp, chưa chuyển cả thư mục hoặc tự đồng bộ.
+- Phiên điện thoại mất khi Relay khởi động lại. Chưa xác nhận thủ công toàn bộ luồng trên Android/iPhone thật.
 
-## Mã nguồn
-
-Mã nguồn dự án: [github.com/doletrandat/filetransfer6969](https://github.com/doletrandat/filetransfer6969).
+Mã nguồn: [github.com/doletrandat/filetransfer6969](https://github.com/doletrandat/filetransfer6969).
