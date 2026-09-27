@@ -105,6 +105,18 @@ class SessionRegistry:
                 return None
             return peer
 
+    def revoke_peer(self, peer: AuthorizedPeer) -> int:
+        with self._lock:
+            matches = [
+                digest
+                for digest, (candidate, _) in self._sessions.items()
+                if candidate.id == peer.id
+                and candidate.fingerprint.upper() == peer.fingerprint.upper()
+            ]
+            for digest in matches:
+                del self._sessions[digest]
+            return len(matches)
+
 
 class PairingError(ValueError):
     pass

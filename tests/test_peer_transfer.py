@@ -106,13 +106,19 @@ def test_pinned_tls_pairing_and_transfer(tmp_path: Path) -> None:
         )
         assert restored.list_outgoing()[0].status == "failed"
         assert restored.list_staged()[0].id == second_staged.id
-        restored.pair(new_ticket.code)
+        reconnected = restored.pair(new_ticket.code)
         restored.retry_outgoing(pending.id)
         second_received = receiver_app.state.context.transfers.incoming_status(pending.id)
         assert (
             Path(second_received.destination) / "folder" / "second.txt"
         ).read_bytes() == second_content
         assert restored.list_outgoing()[0].status == "complete"
+
+        assert restored.disconnect_peer(peer.id) is True
+        assert restored.list_peers() == []
+        assert receiver_context.sessions.verify(peer.session_token) is None
+        assert receiver_context.sessions.verify(reconnected.session_token) is None
+        assert restored.disconnect_peer(peer.id) is False
     finally:
         receiver_server.should_exit = True
         thread.join(timeout=10)

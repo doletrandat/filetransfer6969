@@ -139,10 +139,12 @@ main { width: min(100%, 1180px); margin: 0 auto; padding: 32px 40px 50px; }
 .discovery-state { display: inline-flex; align-items: center; gap: 8px; color: var(--muted); font-size: 11px; white-space: nowrap; }
 .device-list { min-height: 61px; max-height: 195px; overflow-y: auto; border: 1px solid var(--line); border-radius: 11px; background: var(--surface); }
 .device-list .empty-message { padding: 20px; }
-.device-row { width: 100%; display: grid; grid-template-columns: 9px minmax(0, 1fr) auto; align-items: center; gap: 13px; min-height: 60px; padding: 10px 17px; border: 0; border-bottom: 1px solid var(--line); background: transparent; color: var(--ink); text-align: left; transition: background-color 160ms ease; }
+.device-row { width: 100%; display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 12px; min-height: 60px; padding-right: 17px; border-bottom: 1px solid var(--line); background: transparent; color: var(--ink); transition: background-color 160ms ease; }
 .device-row:last-child { border-bottom: 0; }
 .device-row:hover { background: #f7f9fd; }
 .device-row.selected { background: #f1f5fd; box-shadow: inset 3px 0 0 var(--blue); }
+.device-select { min-width: 0; display: grid; grid-template-columns: 9px minmax(0, 1fr) auto; align-items: center; gap: 13px; min-height: 59px; padding: 10px 0 10px 17px; border: 0; background: transparent; color: var(--ink); text-align: left; }
+.device-disconnect { white-space: nowrap; }
 .device-lamp { width: 7px; height: 7px; border-radius: 50%; background: var(--green); }
 .device-name, .device-address { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .device-name { font-size: 12px; font-weight: 650; }

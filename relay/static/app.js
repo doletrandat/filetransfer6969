@@ -221,14 +221,17 @@ function renderDevices() {
     const connected = pairedIds.has(device.id);
     const selected = state.selectedPeerId === device.id;
     return `
-      <button class="device-row${selected ? " selected" : ""}" type="button" data-device-id="${escapeHtml(device.id)}" aria-pressed="${selected}">
-        <span class="device-lamp" aria-hidden="true"></span>
-        <span>
-          <span class="device-name">${escapeHtml(device.name)}</span>
-          <span class="device-address">${escapeHtml(device.host)}:${device.port} · ${escapeHtml(device.fingerprint.slice(0, 11))}</span>
-        </span>
-        <span class="device-state">${connected ? "Đã kết nối" : selected ? "Đã chọn" : "Sẵn sàng"}</span>
-      </button>`;
+      <div class="device-row${selected ? " selected" : ""}">
+        <button class="device-select" type="button" data-device-id="${escapeHtml(device.id)}" aria-pressed="${selected}">
+          <span class="device-lamp" aria-hidden="true"></span>
+          <span>
+            <span class="device-name">${escapeHtml(device.name)}</span>
+            <span class="device-address">${escapeHtml(device.host)}:${device.port} · ${escapeHtml(device.fingerprint.slice(0, 11))}</span>
+          </span>
+          <span class="device-state">${connected ? "Đã kết nối" : selected ? "Đã chọn" : "Sẵn sàng"}</span>
+        </button>
+        ${connected ? `<button class="text-button device-disconnect" type="button" data-disconnect-peer="${escapeHtml(device.id)}">Ngắt kết nối</button>` : ""}
+      </div>`;
   }).join("");
 }
 
@@ -719,7 +722,24 @@ async function send() {
   }
 }
 
-elements.deviceList.addEventListener("click", (event) => {
+elements.deviceList.addEventListener("click", async (event) => {
+  const disconnectButton = event.target.closest("[data-disconnect-peer]");
+  if (disconnectButton) {
+    const peerId = disconnectButton.dataset.disconnectPeer;
+    const peer = state.peers.find((candidate) => candidate.id === peerId);
+    disconnectButton.disabled = true;
+    try {
+      await api(`/api/v1/peers/${encodeURIComponent(peerId)}`, { method: "DELETE" });
+      state.peers = state.peers.filter((candidate) => candidate.id !== peerId);
+      if (state.selectedPeerId === peerId) state.selectedPeerId = null;
+      await refresh();
+      showToast(`Đã ngắt kết nối với ${peer?.name || "máy tính"}.`);
+    } catch (error) {
+      disconnectButton.disabled = false;
+      showToast(error.message, true);
+    }
+    return;
+  }
   const row = event.target.closest("[data-device-id]");
   if (!row) return;
   const deviceId = row.dataset.deviceId;

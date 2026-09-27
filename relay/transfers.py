@@ -495,6 +495,25 @@ class TransferManager:
                 del self._peers[peer_id]
             return sorted(self._peers.values(), key=lambda peer: peer.name.lower())
 
+    def disconnect_peer(self, peer_id: str) -> bool:
+        with self._lock:
+            peer = self._peers.pop(peer_id, None)
+        if peer is None:
+            return False
+        try:
+            identity, client = open_peer_client(peer.endpoint, peer.fingerprint)
+            with client:
+                if DeviceMessage.model_validate(identity).id != peer.id:
+                    return True
+                response = client.delete(
+                    f"{peer.endpoint}/api/v1/remote/session",
+                    headers={"Authorization": f"Bearer {peer.session_token}"},
+                )
+                response.raise_for_status()
+        except (httpx.HTTPError, PeerConnectionError, ValueError):
+            pass
+        return True
+
     def start_outgoing(
         self,
         peer_id: str,

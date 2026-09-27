@@ -506,6 +506,12 @@ def create_app(context: AppContext) -> FastAPI:
     def peers() -> list[dict[str, Any]]:
         return [peer.public_dict() for peer in context.transfers.list_peers()]
 
+    @app.delete("/api/v1/peers/{peer_id}")
+    def disconnect_peer(peer_id: str) -> dict[str, bool]:
+        if not context.transfers.disconnect_peer(peer_id):
+            raise HTTPException(status_code=404, detail="That device is not connected.")
+        return {"disconnected": True}
+
     @app.get("/api/v1/staged")
     def staged() -> list[dict[str, Any]]:
         return [item.public_dict() for item in context.transfers.list_staged()]
@@ -616,6 +622,12 @@ def create_app(context: AppContext) -> FastAPI:
             },
             "expires_in": 3600,
         }
+
+    @app.delete("/api/v1/remote/session")
+    def remote_disconnect(
+        peer: AuthorizedPeer = Depends(require_session),
+    ) -> dict[str, bool]:
+        return {"disconnected": context.sessions.revoke_peer(peer) > 0}
 
     @app.post("/api/v1/remote/transfers")
     def remote_start_transfer(

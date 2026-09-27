@@ -147,6 +147,20 @@ def test_local_control_is_private_to_the_device(tmp_path: Path) -> None:
         assert rebound.get("/api/v1/status").status_code == 403
 
 
+def test_disconnect_peer_requires_local_control(tmp_path: Path) -> None:
+    app = build_app(tmp_path, 9876)
+    with patch.object(app.state.context.transfers, "disconnect_peer", return_value=True) as action:
+        with local_client(app) as client:
+            assert client.delete("/api/v1/peers/device-1").status_code == 403
+            response = client.delete(
+                "/api/v1/peers/device-1",
+                headers={"X-Relay-Control-Token": app.state.context.control_token},
+            )
+        assert response.status_code == 200
+        assert response.json() == {"disconnected": True}
+        action.assert_called_once_with("device-1")
+
+
 def test_remote_manifest_must_match_paired_device(tmp_path: Path) -> None:
     app = build_app(tmp_path, 9876)
     peer = AuthorizedPeer(id="sender", name="Sender", fingerprint="A" * 64)
