@@ -8,11 +8,13 @@ from dataclasses import replace
 from pathlib import Path
 from typing import Any, cast
 
+import pytest
 import uvicorn
 
 from relay.app import AppContext, create_app
-from relay.config import DeviceIdentity, SettingsStore
+from relay.config import DeviceIdentity, SettingsStore, load_or_create_identity
 from relay.discovery import DiscoveredDevice, DiscoveryManager
+from relay.network import PeerConnectionError
 from relay.security import hash_code
 from relay.transfers import TransferManager
 
@@ -44,8 +46,13 @@ def wait_for_server(server: uvicorn.Server) -> None:
         raise RuntimeError("Test server did not start.")
 
 
-def test_pinned_tls_pairing_and_transfer(tmp_path: Path) -> None:
+@pytest.mark.parametrize("changed_ip", [False, True])
+def test_pinned_tls_pairing_and_transfer(tmp_path: Path, changed_ip: bool) -> None:
     receiver_port = open_port()
+    if changed_ip:
+        receiver_dir = tmp_path / "receiver"
+        receiver_dir.mkdir()
+        load_or_create_identity(receiver_dir, "Receiver", ["192.168.1.10"], receiver_port)
     receiver_context = AppContext(tmp_path / "receiver", receiver_port)
     receiver_app = create_app(receiver_context)
     receiver_server = uvicorn.Server(
@@ -121,4 +128,46 @@ def test_pinned_tls_pairing_and_transfer(tmp_path: Path) -> None:
         assert restored.disconnect_peer(peer.id) is False
     finally:
         receiver_server.should_exit = True
+        thread.join(timeout=10)
+
+
+def test_pairing_reports_stale_peer_certificate_without_redeeming_code(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("relay.app.get_local_addresses", lambda: ["192.168.1.10"])
+    port = open_port()
+    context = AppContext(tmp_path / "receiver", port)
+    server = uvicorn.Server(uvicorn.Config(
+        create_app(context), host="127.0.0.1", port=port,
+        ssl_certfile=str(context.data_dir / "identity.crt"),
+        ssl_keyfile=str(context.data_dir / "identity.key"), log_level="critical",
+    ))
+    thread = threading.Thread(target=server.run, daemon=True)
+    thread.start()
+    try:
+        wait_for_server(server)
+        ticket = context.pairing.create_ticket()
+        device = DiscoveredDevice(
+            id=context.identity.id, name="Receiver", host="127.0.0.1", port=port,
+            fingerprint=context.identity.fingerprint, code_hash=hash_code(ticket.code),
+            last_seen=time.time(),
+        )
+        sender_dir = tmp_path / "sender"
+        manager = TransferManager(
+            sender_dir, SettingsStore(sender_dir),
+            DeviceIdentity(id="sender", name="Sender", fingerprint="A" * 64),
+            cast(DiscoveryManager, FixedDiscovery(device)),
+        )
+        with pytest.raises(PeerConnectionError, match="Chứng chỉ HTTPS.*địa chỉ IP"):
+            manager.pair(ticket.code)
+        assert context.pairing.ticket == ticket
+
+        with pytest.raises(PeerConnectionError, match="fingerprint did not match"):
+            manager.pair(
+                ticket.code, endpoint=f"https://127.0.0.1:{port}",
+                fingerprint="00:" * 31 + "00",
+            )
+        assert context.pairing.ticket == ticket
+    finally:
+        server.should_exit = True
         thread.join(timeout=10)

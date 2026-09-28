@@ -14,6 +14,24 @@ class PeerConnectionError(RuntimeError):
     pass
 
 
+def connection_error_message(error: httpx.HTTPError) -> str:
+    cause: BaseException | None = error
+    while cause is not None:
+        if isinstance(cause, ssl.SSLCertVerificationError):
+            if cause.verify_code in {62, 64}:  # Hostname / IP address mismatch.
+                return (
+                    "Chứng chỉ HTTPS của máy nhận không khớp địa chỉ IP hiện tại. "
+                    "Hãy cập nhật và khởi động lại Relay trên máy nhận, "
+                    "sau đó tạo mã ghép nối mới."
+                )
+            return (
+                "Không thể xác thực chứng chỉ HTTPS của máy nhận. "
+                "Hãy kiểm tra ngày giờ, cập nhật và khởi động lại Relay trên máy nhận."
+            )
+        cause = cause.__cause__ or cause.__context__
+    return "Không thể kết nối tới máy nhận. Hãy kiểm tra mạng và mở Relay trên máy nhận."
+
+
 def normalize_endpoint(endpoint: str) -> str:
     parsed = urlparse(endpoint)
     if parsed.scheme != "https" or not parsed.hostname or parsed.username or parsed.password:

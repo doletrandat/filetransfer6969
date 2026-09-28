@@ -24,7 +24,7 @@ from relay.models import (
     StagedItemMessage,
     TransferManifestItem,
 )
-from relay.network import PeerConnectionError, open_peer_client
+from relay.network import PeerConnectionError, connection_error_message, open_peer_client
 from relay.security import SESSION_TTL_SECONDS, hash_code
 
 CHUNK_SIZE = 1024 * 1024
@@ -481,7 +481,9 @@ class TransferManager:
                 raise PeerConnectionError(
                     _response_error(error, "The pairing code was not accepted.")
                 ) from error
-            except (httpx.HTTPError, ValueError, KeyError) as error:
+            except httpx.HTTPError as error:
+                last_error = PeerConnectionError(connection_error_message(error))
+            except (ValueError, KeyError) as error:
                 last_error = error
         if isinstance(last_error, PeerConnectionError):
             raise last_error

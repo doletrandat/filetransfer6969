@@ -53,6 +53,8 @@ Relay tự mở `https://127.0.0.1:8765` trên máy đang chạy. Nếu cổng 8
 
 Chứng chỉ HTTPS được tạo trên từng máy. Trình duyệt có thể cảnh báo ở lần đầu mở; chỉ tiếp tục sau khi kiểm tra đúng địa chỉ của máy mình. Trang quản lý chỉ truy cập từ chính máy chạy Relay tại `localhost`.
 
+Sau khi đổi Wi-Fi hoặc được cấp IP mới, khởi động lại Relay trên cả hai máy. Khi khởi động, Relay tự cấp lại chứng chỉ nếu thiếu IP hiện tại hoặc sắp hết hạn, giữ nguyên mã định danh thiết bị và thư mục nhận. Tạo mã ghép nối mới để kết nối lại; trình duyệt có thể yêu cầu xác nhận chứng chỉ mới. Nếu gặp lỗi chứng chỉ không khớp IP, cần cập nhật Relay trên máy nhận nữa.
+
 ## Cách sử dụng
 
 ### Giữa hai máy Windows

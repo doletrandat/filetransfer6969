@@ -94,23 +94,42 @@ def load_or_create_identity(
     else:
         device_id = create_device_id()
         device_id_path.write_text(device_id, encoding="utf-8")
-    if key_path.exists() and cert_path.exists():
-        return DeviceIdentity(
-            id=device_id, name=name, fingerprint=certificate_fingerprint(cert_path)
-        )
-    private_key = ec.generate_private_key(ec.SECP256R1())
-    subject = issuer = x509.Name(
-        [
-            x509.NameAttribute(NameOID.COMMON_NAME, "Relay device"),
-            x509.NameAttribute(NameOID.ORGANIZATION_NAME, device_id),
-        ]
-    )
     sans: list[x509.GeneralName] = [
         x509.DNSName("localhost"),
         x509.DNSName(f"{socket.gethostname()}.local"),
     ]
     sans.extend(x509.IPAddress(ipaddress.ip_address(address)) for address in addresses)
     now = datetime.now(UTC)
+    if key_path.exists() and cert_path.exists():
+        certificate = x509.load_pem_x509_certificate(cert_path.read_bytes())
+        try:
+            existing_names = certificate.extensions.get_extension_for_class(
+                x509.SubjectAlternativeName
+            ).value
+        except x509.ExtensionNotFound:
+            existing_names = x509.SubjectAlternativeName([])
+        if (
+            set(sans).issubset(existing_names)
+            and certificate.not_valid_before_utc <= now
+            and certificate.not_valid_after_utc > now + timedelta(days=1)
+        ):
+            return DeviceIdentity(
+                id=device_id, name=name, fingerprint=certificate_fingerprint(cert_path)
+            )
+    # DHCP / Wi-Fi changes require a new certificate, but keep this device's key and ID.
+    if key_path.exists():
+        stored_key = serialization.load_pem_private_key(key_path.read_bytes(), password=None)
+        if not isinstance(stored_key, ec.EllipticCurvePrivateKey):
+            raise ValueError("Relay identity.key must contain an elliptic curve private key.")
+        private_key = stored_key
+    else:
+        private_key = ec.generate_private_key(ec.SECP256R1())
+    subject = issuer = x509.Name(
+        [
+            x509.NameAttribute(NameOID.COMMON_NAME, "Relay device"),
+            x509.NameAttribute(NameOID.ORGANIZATION_NAME, device_id),
+        ]
+    )
     certificate = (
         x509.CertificateBuilder()
         .subject_name(subject)
@@ -137,14 +156,17 @@ def load_or_create_identity(
         )
         .sign(private_key, hashes.SHA256())
     )
-    key_path.write_bytes(
-        private_key.private_bytes(
-            encoding=serialization.Encoding.PEM,
-            format=serialization.PrivateFormat.PKCS8,
-            encryption_algorithm=serialization.NoEncryption(),
+    if not key_path.exists():
+        key_path.write_bytes(
+            private_key.private_bytes(
+                encoding=serialization.Encoding.PEM,
+                format=serialization.PrivateFormat.PKCS8,
+                encryption_algorithm=serialization.NoEncryption(),
+            )
         )
-    )
-    cert_path.write_bytes(certificate.public_bytes(serialization.Encoding.PEM))
+    pending_cert_path = cert_path.with_suffix(".crt.tmp")
+    pending_cert_path.write_bytes(certificate.public_bytes(serialization.Encoding.PEM))
+    pending_cert_path.replace(cert_path)
     return DeviceIdentity(id=device_id, name=name, fingerprint=certificate_fingerprint(cert_path))
 
 
