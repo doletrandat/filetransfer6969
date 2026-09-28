@@ -67,7 +67,8 @@ class PairingRegistry:
                 failures.append(now)
                 remaining = max(1, MAX_CODE_ATTEMPTS - len(failures))
                 raise PairingError(f"That code is not correct. {remaining} attempts remain.")
-            self._ticket = None
+            # Keep admission open for other peers until expiry or code rotation.
+            # Every redemption still receives an independent session token.
             return issue_session_token(peer)
 
 

@@ -31,7 +31,7 @@ The Python service starts on each Windows device and opens a local browser inter
 - Windows is the supported service runtime; Android and iPhone use a browser client and do not run the Python service.
 - Transfer one or more files and complete folders.
 - Support Zeroconf/mDNS discovery and QR or manual-code pairing.
-- Use one-time, expiring pairing authorization and encrypted transport.
+- Allow multiple Windows peers to use the same pairing code until its 10-minute expiry or replacement, with independent sessions and encrypted transport.
 - Show device identity, pairing state, transfer progress, failures, and completion state.
 - Handle large reliable transfers, retry or resume behavior, duplicate filenames, and folder boundaries safely.
 - Do not require accounts, cloud infrastructure, or internet service.

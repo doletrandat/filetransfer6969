@@ -553,7 +553,7 @@ async function createCode() {
     elements.pairingQr.src = state.ticket.qr_data_url;
     renderTicket();
     elements.closePairingTicketButton.focus();
-    setPairMessage("Quét mã này hoặc nhập mã trên máy tính còn lại.");
+    setPairMessage("Các máy khác có thể quét hoặc nhập cùng mã này trong 10 phút.");
   } catch (error) {
     setPairMessage(error.message, true);
   }

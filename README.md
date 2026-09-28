@@ -60,7 +60,7 @@ Sau khi đổi Wi-Fi hoặc được cấp IP mới, khởi động lại Relay 
 ### Giữa hai máy Windows
 
 1. Kết nối hai máy vào cùng mạng và chạy Relay trên cả hai.
-2. Trên máy **nhận**, vào **Nhận** → **Tạo mã** để lấy mã ghép nối dùng một lần.
+2. Trên máy **nhận**, vào **Nhận** → **Tạo mã** để lấy mã ghép nối. Nhiều máy gửi có thể dùng cùng mã trong 10 phút và truyền tệp đồng thời, mỗi máy có phiên riêng.
 3. Trên máy **gửi**, vào **Gửi** → **Ghép nối bằng mã bảo mật hoặc quét QR**. Nhập mã hoặc quét QR, sau đó chọn máy nhận.
 4. Chọn **Chọn tệp**, **Chọn thư mục** hoặc kéo thả tệp vào vùng chọn. Khi danh sách tệp đã chuẩn bị hiện ra, bắt đầu gửi tới máy đã chọn.
 5. Xem tiến độ và kết quả trong **Lịch sử** trên hai máy. Tệp nhận mặc định ở `%USERPROFILE%\Downloads\Relay`; có thể đổi tại **Lịch sử → Thư mục lưu tệp nhận**.
@@ -87,7 +87,7 @@ flowchart LR
     B -->|Kiểm tra kích thước và SHA-256| D[Thư mục nhận]
 ```
 
-- **Ghép nối:** mã máy tính gồm 8 ký tự, chỉ dùng một lần và hết hạn sau 10 phút. Kết nối HTTPS giữa hai máy được kiểm tra theo fingerprint chứng chỉ đã ghép nối.
+- **Ghép nối:** mã máy tính gồm 8 ký tự, dùng được cho nhiều máy trong 10 phút. Mỗi máy được cấp phiên riêng; ngắt một máy không ảnh hưởng các máy khác. Tạo mã mới làm mã cũ mất hiệu lực nhưng giữ các phiên đã kết nối. Kết nối HTTPS giữa hai máy được kiểm tra theo fingerprint chứng chỉ đã ghép nối.
 - **Toàn vẹn tệp:** truyền giữa hai máy Windows theo từng khối; chỉ đánh dấu hoàn tất khi kích thước và SHA-256 của tệp nhận khớp. Đường dẫn nhận được kiểm tra để không ghi ra ngoài thư mục đích.
 - **Khôi phục:** Relay lưu trạng thái hàng chờ và phần tệp đã nhận. Sau khi khởi động lại, cần ghép nối lại rồi chọn thử gửi lại; ứng dụng chưa tự tiếp tục phiên gửi.
 - **Quyền truy cập:** giao diện điều khiển chỉ mở trên `localhost`; trang điện thoại yêu cầu liên kết mời và phiên kết nối còn hiệu lực.

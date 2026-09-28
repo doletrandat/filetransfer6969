@@ -4,6 +4,7 @@ import asyncio
 import socket
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 from pathlib import Path
 from typing import Any, cast
@@ -168,6 +169,92 @@ def test_pairing_reports_stale_peer_certificate_without_redeeming_code(
                 fingerprint="00:" * 31 + "00",
             )
         assert context.pairing.ticket == ticket
+    finally:
+        server.should_exit = True
+        thread.join(timeout=10)
+
+
+def test_same_code_pairs_and_transfers_from_multiple_peers(tmp_path: Path) -> None:
+    port = open_port()
+    receiver = AppContext(tmp_path / "receiver", port)
+    receiver.settings.update(str(tmp_path / "received"))
+    server = uvicorn.Server(uvicorn.Config(
+        create_app(receiver), host="127.0.0.1", port=port,
+        ssl_certfile=str(receiver.data_dir / "identity.crt"),
+        ssl_keyfile=str(receiver.data_dir / "identity.key"), log_level="critical",
+    ))
+    thread = threading.Thread(target=server.run, daemon=True)
+    thread.start()
+    try:
+        wait_for_server(server)
+        ticket = receiver.pairing.create_ticket()
+        device = DiscoveredDevice(
+            id=receiver.identity.id, name=receiver.identity.name, host="127.0.0.1", port=port,
+            fingerprint=receiver.identity.fingerprint, code_hash=ticket.code_hash,
+            last_seen=time.time(),
+        )
+        managers = []
+        for index in range(3):
+            directory = tmp_path / f"sender-{index}"
+            managers.append(TransferManager(
+                directory, SettingsStore(directory),
+                DeviceIdentity(
+                    id=f"sender-{index}", name=f"Sender {index}", fingerprint=str(index) * 64,
+                ),
+                cast(DiscoveryManager, FixedDiscovery(device)),
+            ))
+
+        with ThreadPoolExecutor(max_workers=3) as pool:
+            pairings = [pool.submit(manager.pair, ticket.code) for manager in managers]
+            peers = [pairing.result(timeout=15) for pairing in pairings]
+            assert len({peer.session_token for peer in peers}) == 3
+            assert receiver.pairing.ticket == ticket
+
+            transfers = []
+            contents = []
+            for index, (manager, peer) in enumerate(zip(managers, peers, strict=True)):
+                content = f"content from sender {index}".encode() * 1000
+                contents.append(content)
+                staged = asyncio.run(manager.stage("message.txt", stream_bytes(content)))
+                transfers.append(manager.start_outgoing(peer.id, "shared batch", [staged.id]))
+            jobs = [
+                pool.submit(manager.run_outgoing, transfer.id)
+                for manager, transfer in zip(managers, transfers, strict=True)
+            ]
+            for job in jobs:
+                job.result(timeout=20)
+
+        destinations = []
+        for index, (manager, transfer, content) in enumerate(
+            zip(managers, transfers, contents, strict=True)
+        ):
+            assert manager.list_outgoing()[0].status == "complete"
+            received = receiver.transfers.incoming_status(transfer.id)
+            assert received.status == "complete"
+            target = received.items[0].target
+            destinations.append(target)
+            assert target.read_bytes() == content
+            authorized = receiver.sessions.verify(peers[index].session_token)
+            assert authorized is not None and authorized.id == f"sender-{index}"
+        assert len(set(destinations)) == 3
+
+        assert managers[0].disconnect_peer(peers[0].id)
+        assert receiver.sessions.verify(peers[0].session_token) is None
+        for peer in peers[1:]:
+            assert receiver.sessions.verify(peer.session_token) is not None
+
+        # Rotating the shared code closes admission through the old code, while
+        # the remaining connected peers can still send with their own tokens.
+        receiver.pairing.create_ticket()
+        with pytest.raises(PeerConnectionError, match="not correct"):
+            managers[0].pair(ticket.code)
+        remaining = managers[1]
+        staged = asyncio.run(remaining.stage("after-disconnect.txt", stream_bytes(b"still paired")))
+        transfer = remaining.start_outgoing(peers[1].id, "another batch", [staged.id])
+        remaining.run_outgoing(transfer.id)
+        received = receiver.transfers.incoming_status(transfer.id)
+        assert received.status == "complete"
+        assert (Path(received.destination) / "after-disconnect.txt").read_bytes() == b"still paired"
     finally:
         server.should_exit = True
         thread.join(timeout=10)
