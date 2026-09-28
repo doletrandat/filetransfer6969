@@ -22,7 +22,7 @@ sys.path.insert(0, str(ROOT))
 
 from relay import transfers as transfer_module  # noqa: E402
 from relay.app import AppContext, create_app  # noqa: E402
-from relay.transfers import TransferError  # noqa: E402
+from relay.transfers import TransferError, device_folder_name  # noqa: E402
 
 
 def open_port() -> int:
@@ -93,6 +93,8 @@ def main() -> None:
                 errors = []
                 page.on("pageerror", lambda error: errors.append(str(error)))
                 page.goto(f"https://127.0.0.1:{sender.port}", wait_until="networkidle")
+                if page.locator("#notificationDialog").is_visible():
+                    page.locator("#dismissNotificationsButton").click()
                 page.locator('[data-view="send"]').click()
                 expect(page.locator("#sendProgress")).to_be_hidden()
                 page.locator("#fileInput").set_input_files([
@@ -142,13 +144,16 @@ def main() -> None:
                 )
                 expect(card).to_contain_text("2/2 tệp hoàn tất")
                 expect(card.locator('[data-send-field="bytes"]')).to_have_text("8.0 MB / 8.0 MB")
-                received_dir = Path(temporary) / "receiver/received"
+                received_dir = (
+                    Path(temporary) / "receiver/received" / device_folder_name(sender.identity.name)
+                )
                 assert (received_dir / "first.bin").read_bytes() == b"a" * (4 * 1024 * 1024)
                 assert (received_dir / "second.bin").read_bytes() == b"b" * (4 * 1024 * 1024)
                 page.reload(wait_until="networkidle")
                 page.locator('[data-view="send"]').click()
                 expect(card.locator(".transfer-state")).to_have_text("Hoàn tất")
 
+                page.locator("#clearStagedButton").click()
                 reject_chunks = True
                 page.locator("#fileInput").set_input_files({
                     "name": "retry.txt", "mimeType": "text/plain", "buffer": b"retry me",
@@ -163,8 +168,9 @@ def main() -> None:
                 card.get_by_role("button", name="Thử gửi lại").click()
                 expect(card.locator(".transfer-state")).to_have_text("Hoàn tất", timeout=15000)
                 assert len(sender.transfers.list_outgoing()) == 2
-                assert (Path(temporary) / "receiver/received/retry.txt").read_bytes() == b"retry me"
+                assert (received_dir / "retry.txt").read_bytes() == b"retry me"
 
+                page.locator("#clearStagedButton").click()
                 page.locator("#fileInput").set_input_files({
                     "name": "empty.txt", "mimeType": "text/plain", "buffer": b"",
                 })

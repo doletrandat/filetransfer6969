@@ -2,13 +2,14 @@ const state = {
   status: null,
   devices: [],
   peers: [],
+  receivingPeers: [],
   staged: [],
   outgoing: [],
   incoming: [],
   phoneUploads: [],
   phoneConnection: null,
   hasSnapshot: false,
-  selectedPeerId: null,
+  selectedPeerIds: new Set(),
   ticket: null,
   uploading: false,
   sending: false,
@@ -50,7 +51,6 @@ const elements = {
   createCodeButton: document.querySelector("#createCodeButton"),
   phoneConnectButton: document.querySelector("#phoneConnectButton"),
   phoneConnectionStatus: document.querySelector("#phoneConnectionStatus"),
-  phoneHeaderStatus: document.querySelector("#phoneHeaderStatus"),
   phoneInvite: document.querySelector("#phoneInvite"),
   closePhoneInviteButton: document.querySelector("#closePhoneInviteButton"),
   phoneInviteQr: document.querySelector("#phoneInviteQr"),
@@ -58,6 +58,10 @@ const elements = {
   phoneDisconnectButton: document.querySelector("#phoneDisconnectButton"),
   phoneUploadCount: document.querySelector("#phoneUploadCount"),
   enableNotificationsButton: document.querySelector("#enableNotificationsButton"),
+  notificationDialog: document.querySelector("#notificationDialog"),
+  dismissNotificationsButton: document.querySelector("#dismissNotificationsButton"),
+  connectedDevicesList: document.querySelector("#connectedDevicesList"),
+  sidebarProgressList: document.querySelector("#sidebarProgressList"),
   phoneUploadsList: document.querySelector("#phoneUploadsList"),
   pairingTicket: document.querySelector("#pairingTicket"),
   closePairingTicketButton: document.querySelector("#closePairingTicketButton"),
@@ -242,50 +246,69 @@ function renderPhoneConnection() {
       ? "Đang chờ điện thoại quét mã QR."
       : "Chưa có điện thoại kết nối.";
   elements.phoneConnectionStatus.classList.toggle("is-connected", status === "connected");
-  elements.phoneHeaderStatus.hidden = status !== "connected";
   elements.phoneDisconnectButton.hidden = status !== "connected" && status !== "waiting";
   elements.phoneDisconnectButton.textContent = status === "waiting" ? "Hủy mã QR" : "Ngắt kết nối";
 }
 
 function renderDevices() {
   if (!state.hasSnapshot) return;
-  if (!state.devices.length) {
+  const devices = [...state.devices];
+  for (const peer of state.peers) {
+    if (!devices.some((device) => device.id === peer.id)) {
+      const endpoint = new URL(peer.endpoint);
+      devices.push({ ...peer, host: endpoint.hostname, port: endpoint.port });
+    }
+  }
+  if (!devices.length) {
     elements.deviceList.innerHTML = `
       <p class="empty-message">Chưa thấy máy tính nào. Hãy mở Relay trên máy còn lại và kiểm tra cả hai dùng chung mạng.</p>`;
     return;
   }
   const pairedIds = new Set(state.peers.map((peer) => peer.id));
-  elements.deviceList.innerHTML = state.devices.map((device) => {
+  setHtmlIfChanged(elements.deviceList, devices.map((device) => {
     const connected = pairedIds.has(device.id);
-    const selected = state.selectedPeerId === device.id;
+    const selected = state.selectedPeerIds.has(device.id);
     return `
       <div class="device-row${selected ? " selected" : ""}">
-        <button class="device-select" type="button" data-device-id="${escapeHtml(device.id)}" aria-pressed="${selected}">
-          <span class="device-lamp" aria-hidden="true"></span>
+        <label class="device-select">
+          <input type="checkbox" data-device-id="${escapeHtml(device.id)}" aria-label="Chọn ${escapeHtml(device.name)}" ${selected ? "checked" : ""} ${connected ? "" : "disabled"}>
           <span>
             <span class="device-name">${escapeHtml(device.name)}</span>
             <span class="device-address">${escapeHtml(device.host)}:${device.port} · ${escapeHtml(device.fingerprint.slice(0, 11))}</span>
           </span>
-          <span class="device-state">${connected ? "Đã kết nối" : selected ? "Đã chọn" : "Sẵn sàng"}</span>
-        </button>
+          <span class="device-state">${connected ? "Đã kết nối" : "Chưa kết nối"}</span>
+        </label>
+        ${!connected ? `<button class="text-button" type="button" data-pair-device="${escapeHtml(device.id)}">Kết nối</button>` : ""}
         ${connected ? `<button class="text-button device-disconnect" type="button" data-disconnect-peer="${escapeHtml(device.id)}">Ngắt kết nối</button>` : ""}
       </div>`;
-  }).join("");
+  }).join(""));
+}
+
+function selectedPeers() {
+  return state.peers.filter((peer) => state.selectedPeerIds.has(peer.id));
+}
+
+function peerAlreadySending(peer) {
+  return state.outgoing.some((transfer) => isSending(transfer)
+    && transfer.peer_id === peer.id
+    && state.staged.some((item) => transfer.item_ids.includes(item.id)));
 }
 
 function renderTarget() {
-  const peer = state.peers.find((candidate) => candidate.id === state.selectedPeerId);
-  elements.targetStamp.textContent = peer?.name || "Chưa chọn";
-  elements.transferSubtitle.textContent = peer
-    ? `Các tệp sẽ được gửi trực tiếp đến ${peer.name}. Tệp đã chọn cũng hiện trên điện thoại đã kết nối để tải về.`
+  const peers = selectedPeers();
+  const targets = peers.length === 1 ? peers[0].name : `${peers.length} thiết bị`;
+  elements.targetStamp.textContent = peers.length ? targets : "Chưa chọn";
+  elements.targetStamp.title = peers.map((peer) => peer.name).join(", ");
+  elements.transferSubtitle.textContent = peers.length
+    ? `Các tệp sẽ được gửi trực tiếp đến ${targets}. Tệp đã chọn cũng hiện trên điện thoại đã kết nối để tải về.`
     : "Chọn máy tính đã kết nối để gửi. Nếu gửi cho điện thoại, tệp được chọn sẽ hiện trên điện thoại để tải về.";
-  const alreadySending = state.outgoing.some((transfer) => isSending(transfer)
-    && transfer.peer_id === peer?.id
-    && state.staged.some((item) => transfer.item_ids.includes(item.id)));
-  const ready = Boolean(peer && state.staged.length && !state.uploading && !state.sending && !alreadySending);
+  const available = peers.filter((peer) => !peerAlreadySending(peer));
+  const ready = Boolean(available.length && state.staged.length && !state.uploading && !state.sending);
   elements.sendButton.disabled = !ready;
   elements.sendButton.querySelector("span").textContent = state.sending ? "Đang chuẩn bị gửi…"
-    : alreadySending ? `Đang gửi đến ${peer.name}` : peer ? `Gửi đến ${peer.name}` : "Chọn máy tính nhận";
+    : peers.length && !available.length ? "Đang gửi đến các máy đã chọn"
+      : available.length === 1 ? `Gửi đến ${available[0].name}`
+        : available.length ? `Gửi đến ${available.length} thiết bị` : "Chọn máy tính nhận";
 }
 
 function isSending(transfer) {
@@ -426,7 +449,7 @@ function transferEntries() {
   });
   const phone = state.phoneUploads.map((item) => ({
     kind: "received", id: `phone:${item.id}`, time: Number(item.received_at) || 0,
-    name: item.name, counterpart: "Điện thoại", size: item.size,
+    name: item.name, counterpart: item.device_name || "Điện thoại", size: item.size,
     status: item.status || "complete", transferred: item.received_bytes ?? item.size, speed: 0,
     error: item.error || "", phoneItem: item.status ? null : item,
     phoneTransfer: item.status ? item : null, items: [],
@@ -556,14 +579,43 @@ function renderTransfers() {
   syncActiveProgress(elements.historyList, entries);
 }
 
-function updateNotificationButton() {
-  if (!("Notification" in window)) {
-    elements.enableNotificationsButton.hidden = true;
-    return;
+function askNotificationsOnce() {
+  if (!("Notification" in window) || !window.isSecureContext || Notification.permission !== "default") return;
+  try {
+    if (localStorage.getItem("relay-notifications-asked")) return;
+    localStorage.setItem("relay-notifications-asked", "1");
+  } catch (_) { /* Storage may be disabled; the prompt still works for this visit. */ }
+  elements.notificationDialog.showModal();
+}
+
+function notifyReceived(message) {
+  showToast(message);
+  if ("Notification" in window && Notification.permission === "granted") {
+    try { new Notification("Relay · Tệp mới", { body: message }); } catch (_) { /* Keep the toast. */ }
   }
-  elements.enableNotificationsButton.textContent = Notification.permission === "granted"
-    ? "Thông báo đã bật" : "Bật thông báo trên máy tính";
-  elements.enableNotificationsButton.disabled = Notification.permission === "granted";
+}
+
+function renderSidebar() {
+  const phones = state.phoneConnection?.status === "connected"
+    ? state.phoneConnection.devices || [{ name: "Điện thoại" }] : [];
+  const computers = [...new Map([...state.peers, ...state.receivingPeers].map((peer) => [peer.id, peer])).values()];
+  const devices = [...computers, ...phones];
+  setHtmlIfChanged(elements.connectedDevicesList, state.connectionError
+    ? '<p class="sidebar-empty">Mất kết nối với Relay</p>'
+    : devices.length ? devices.map((device) => `<div class="sidebar-device"><span class="device-lamp" aria-hidden="true"></span><span>${escapeHtml(device.name)}</span></div>`).join("")
+      : '<p class="sidebar-empty">Chưa có thiết bị</p>');
+  const active = transferEntries().filter((entry) => ["preparing", "sending", "receiving", "waiting"].includes(entry.status));
+  const rows = active.map((entry) => {
+    const progress = Math.min(99, percent(entry.transferred, entry.size));
+    const label = state.connectionError ? "Chờ kết nối" : entry.status === "waiting" ? "Chờ tiếp tục" : entry.kind === "sent" ? "Đang gửi" : "Đang nhận";
+    return `<button type="button" class="sidebar-transfer" data-sidebar-view="${entry.kind === "sent" ? "send" : "receive"}">
+      <strong>${escapeHtml(entry.counterpart)}</strong><span>${escapeHtml(entry.name)}</span>
+      <span class="sidebar-transfer-status">${label} · ${progress}%</span>
+      <progress max="100" value="${progress}" aria-label="${escapeHtml(label + " " + entry.name)}"></progress></button>`;
+  });
+  if (state.uploading) rows.unshift(`<p class="sidebar-empty">Đang chuẩn bị tệp · ${percent(state.uploadProgress?.loaded || 0, state.uploadProgress?.total)}%</p>`);
+  if (state.sending) rows.unshift(`<p class="sidebar-empty">Đang kết nối đến ${escapeHtml(state.pendingPeerName)}…</p>`);
+  setHtmlIfChanged(elements.sidebarProgressList, rows.join("") || '<p class="sidebar-empty">Không có lượt truyền</p>');
 }
 
 function renderPhoneUploads() {
@@ -604,6 +656,7 @@ function renderAll() {
   renderSendProgress();
   renderPhoneUploads();
   renderTicket();
+  renderSidebar();
 }
 
 let refreshPromise = null;
@@ -621,6 +674,7 @@ async function refresh() {
     state.status = payload.status;
     state.devices = payload.devices;
     state.peers = payload.peers;
+    state.receivingPeers = payload.receiving_peers || [];
     state.staged = payload.staged;
     state.outgoing = payload.outgoing;
     state.incoming = payload.incoming;
@@ -635,13 +689,11 @@ async function refresh() {
       if (hadSnapshot && transfer.status === "complete" && previousStatuses.has(transfer.key)
         && previousStatuses.get(transfer.key) !== "complete") {
         state.completedAt.set(transfer.key, Date.now());
+        if (transfer.key.startsWith("received:")) notifyReceived(`Đã nhận ${transfer.batch_name} từ ${transfer.source.name}.`);
       }
     }
-    if (state.selectedPeerId && !state.peers.some((peer) => peer.id === state.selectedPeerId)
-      && !state.devices.some((device) => device.id === state.selectedPeerId)) {
-      state.selectedPeerId = null;
-    }
-    if (!state.selectedPeerId && state.peers.length) state.selectedPeerId = state.peers[0].id;
+    state.selectedPeerIds = new Set([...state.selectedPeerIds].filter((id) => state.peers.some((peer) => peer.id === id)));
+    if (!hadSnapshot && state.peers.length) state.selectedPeerIds.add(state.peers[0].id);
     state.hasSnapshot = true;
     renderAll();
     if (hadSnapshot && previousPhoneStatus !== "connected" && state.phoneConnection?.status === "connected") {
@@ -649,10 +701,7 @@ async function refresh() {
     }
     if (hadSnapshot && newUploads.length) {
       const message = newUploads.length === 1 ? `Đã nhận ${newUploads[0].name} từ điện thoại` : `Đã nhận ${newUploads.length} tệp từ điện thoại`;
-      showToast(message);
-      if ("Notification" in window && Notification.permission === "granted") {
-        try { new Notification("Relay · Tệp mới từ điện thoại", { body: message }); } catch (_) { /* The in-page notice remains visible. */ }
-      }
+      notifyReceived(message);
     }
   })().finally(() => {
     refreshPromise = null;
@@ -718,7 +767,7 @@ async function pairValues(code, endpoint = null, fingerprint = null) {
       body: JSON.stringify({ code, endpoint, fingerprint }),
     });
     state.peers.push(peer);
-    state.selectedPeerId = peer.id;
+    state.selectedPeerIds.add(peer.id);
     state.ticket = null;
     state.ticketDialogOpen = false;
     elements.pairingCode.value = "";
@@ -808,6 +857,7 @@ async function uploadFiles(files) {
         const isFinal = offset + chunk.size >= file.size;
         state.uploadProgress = { name: file.name, loaded: offset, total: file.size };
         renderStaged();
+        renderSidebar();
         const query = new URLSearchParams({
           upload_id: uploadId,
           relative_path: relativePath,
@@ -844,25 +894,37 @@ async function uploadFiles(files) {
 }
 
 async function send() {
-  const peer = state.peers.find((candidate) => candidate.id === state.selectedPeerId);
-  if (!peer || !state.staged.length || elements.sendButton.disabled || state.sending) return;
+  const peers = selectedPeers().filter((peer) => !peerAlreadySending(peer));
+  if (!peers.length || !state.staged.length || elements.sendButton.disabled || state.sending) return;
+  const itemIds = state.staged.map((item) => item.id);
+  const batchName = inferBatchName();
   state.sending = true;
-  state.pendingPeerName = peer.name;
+  state.pendingPeerName = peers.map((peer) => peer.name).join(", ");
   renderAll();
   elements.sendProgress.scrollIntoView({ block: "start", behavior: "smooth" });
   try {
-    const transfer = await api("/api/v1/transfers", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        peer_id: peer.id,
-        batch_name: inferBatchName(),
-        item_ids: state.staged.map((item) => item.id),
-      }),
-    });
-    state.outgoing = [transfer, ...state.outgoing.filter((item) => item.id !== transfer.id)];
-    renderAll();
-    showToast(`Đang gửi tệp đến ${peer.name}.`);
+    const results = await Promise.allSettled(peers.map(async (peer) => {
+      const transfer = await api("/api/v1/transfers", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          peer_id: peer.id,
+          batch_name: batchName,
+          item_ids: itemIds,
+          retain_staged: true,
+        }),
+      });
+      state.outgoing = [transfer, ...state.outgoing.filter((item) => item.id !== transfer.id)];
+      renderAll();
+    }));
+    const failures = results.flatMap((result, index) => result.status === "rejected"
+      ? [`${peers[index].name}: ${result.reason.message}`] : []);
+    // Keep only unsuccessful targets selected so retrying cannot resend to successful peers.
+    for (let index = 0; index < results.length; index++) {
+      if (failures.length && results[index].status === "fulfilled") state.selectedPeerIds.delete(peers[index].id);
+    }
+    showToast(failures.length ? `Đã bắt đầu ${peers.length - failures.length}/${peers.length} lượt gửi. ${failures.join("; ")}`
+      : `Đang gửi tệp đến ${peers.length} thiết bị.`, Boolean(failures.length));
     await refresh();
   } catch (error) {
     showToast(error.message, true);
@@ -881,7 +943,7 @@ elements.deviceList.addEventListener("click", async (event) => {
     try {
       await api(`/api/v1/peers/${encodeURIComponent(peerId)}`, { method: "DELETE" });
       state.peers = state.peers.filter((candidate) => candidate.id !== peerId);
-      if (state.selectedPeerId === peerId) state.selectedPeerId = null;
+      state.selectedPeerIds.delete(peerId);
       await refresh();
       showToast(`Đã ngắt kết nối với ${peer?.name || "máy tính"}.`);
     } catch (error) {
@@ -890,17 +952,27 @@ elements.deviceList.addEventListener("click", async (event) => {
     }
     return;
   }
-  const row = event.target.closest("[data-device-id]");
+  const row = event.target.closest("[data-pair-device]");
   if (!row) return;
-  const deviceId = row.dataset.deviceId;
-  const paired = state.peers.find((peer) => peer.id === deviceId);
-  state.selectedPeerId = deviceId;
-  if (!paired) {
-    setPairMessage(`Nhập mã hiển thị trên ${row.querySelector(".device-name").textContent}.`);
+  const device = state.devices.find((item) => item.id === row.dataset.pairDevice);
+  if (device) {
+    setPairMessage(`Nhập mã hiển thị trên ${device.name}.`);
     elements.pairingOptions.open = true;
     elements.pairingCode.focus();
   }
   renderAll();
+});
+
+elements.deviceList.addEventListener("change", (event) => {
+  const checkbox = event.target.closest("[data-device-id]");
+  if (!checkbox) return;
+  if (checkbox.checked) state.selectedPeerIds.add(checkbox.dataset.deviceId);
+  else state.selectedPeerIds.delete(checkbox.dataset.deviceId);
+  renderAll();
+});
+elements.sidebarProgressList.addEventListener("click", (event) => {
+  const button = event.target.closest("[data-sidebar-view]");
+  if (button) showView(button.dataset.sidebarView);
 });
 
 elements.viewButtons.forEach((button) => {
@@ -1046,11 +1118,10 @@ elements.historyFilters.forEach((button) => button.addEventListener("click", () 
   renderTransfers();
 }));
 elements.enableNotificationsButton.addEventListener("click", async () => {
-  if (!("Notification" in window)) return;
-  const permission = await Notification.requestPermission();
-  updateNotificationButton();
-  showToast(permission === "granted" ? "Thông báo đã bật." : "Chưa bật thông báo. Tệp mới vẫn hiện trong Hộp thư đến.");
+  elements.notificationDialog.close();
+  try { await Notification.requestPermission(); } catch (_) { /* In-page notices remain available. */ }
 });
+elements.dismissNotificationsButton.addEventListener("click", () => elements.notificationDialog.close());
 
 async function openReceivedFile(button) {
   const path = button.dataset.openPhoneUpload
@@ -1114,6 +1185,7 @@ async function pollState() {
   } catch (error) {
     state.connectionError = true;
     renderSendProgress();
+    renderSidebar();
     setPairMessage(error.message, true);
     if (elements.systemStatusPill) elements.systemStatusPill.classList.add("is-offline");
     if (elements.systemStatusText) elements.systemStatusText.textContent = "Mất kết nối";
@@ -1146,6 +1218,6 @@ window.addEventListener("offline", () => {
   }
 });
 window.setInterval(renderTicket, 1000);
-updateNotificationButton();
+askNotificationsOnce();
 showView("receive");
 pollState();

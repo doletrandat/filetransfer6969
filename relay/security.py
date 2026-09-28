@@ -118,6 +118,12 @@ class SessionRegistry:
                 del self._sessions[digest]
             return len(matches)
 
+    def list_peers(self) -> list[AuthorizedPeer]:
+        now = time.time()
+        with self._lock:
+            peers = {peer.id: peer for peer, expiry in self._sessions.values() if expiry > now}
+            return list(peers.values())
+
 
 class PairingError(ValueError):
     pass

@@ -70,7 +70,7 @@ def test_received_computer_file_opens_only_after_completion(tmp_path: Path) -> N
             )
             assert opened.status_code == 200
             assert opened.json() == {"opened": True}
-            launcher.assert_called_once_with(tmp_path / "received" / "hello.txt")
+            launcher.assert_called_once_with(tmp_path / "received" / "Sender" / "hello.txt")
             launcher.side_effect = OSError("No associated application")
             failed = client.post(
                 open_path,
@@ -78,7 +78,7 @@ def test_received_computer_file_opens_only_after_completion(tmp_path: Path) -> N
             )
             assert failed.status_code == 500
             assert "ứng dụng mặc định" in failed.json()["detail"]
-        (tmp_path / "received" / "hello.txt").unlink()
+        (tmp_path / "received" / "Sender" / "hello.txt").unlink()
         assert client.get("/api/v1/state").json()["incoming"][0]["items"][0]["available"] is False
         assert client.get(f"{path}/preview").status_code == 404
         assert client.post(
@@ -111,7 +111,7 @@ def test_local_interface_reports_device_status(tmp_path: Path) -> None:
     assert state.status_code == 200
     assert set(state.json()) == {
         "status", "devices", "peers", "staged", "outgoing", "incoming", "phone_uploads",
-        "phone_connection"
+        "phone_connection", "receiving_peers"
     }
 
 

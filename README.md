@@ -16,7 +16,11 @@ Xem tên và địa chỉ IP nội bộ của máy, tạo mã ghép nối cho m�
 
 ### Gửi tệp
 
-Kéo thả hoặc chọn tệp/thư mục, chọn máy nhận đã ghép nối rồi theo dõi quá trình gửi.
+Kéo thả hoặc chọn tệp/thư mục, đánh dấu một hoặc nhiều máy nhận đã ghép nối rồi gửi đồng thời. Mỗi máy có tiến trình, kết quả và thao tác thử lại riêng. Danh sách thiết bị kết nối và các lượt đang thực hiện luôn hiện ở thanh bên.
+
+Tệp đã chuẩn bị được giữ lại sau khi gửi để tiếp tục gửi sang máy khác hoặc thử lại máy bị lỗi. Chọn **Xóa tất cả** khi không còn cần chia sẻ các tệp này. Khi truy cập lần đầu, Relay tự hỏi bật thông báo nhận tệp; lựa chọn được ghi nhớ trên trình duyệt.
+
+Tệp nhận mới được lưu vào `<Thư mục nhận>/<Tên máy gửi>/`, giữ nguyên cấu trúc thư mục bên trong. Tệp trùng tên nhưng khác nội dung được thêm hậu tố để tránh ghi đè. Các tệp đã nhận trước khi cập nhật vẫn nằm tại vị trí cũ.
 
 ![Màn hình Gửi của Relay trên máy tính, gồm vùng chọn tệp và danh sách thiết bị nhận](docs/screenshots/desktop_03_send.png)
 
@@ -71,7 +75,7 @@ Relay dùng Zeroconf/mDNS để tìm máy trong mạng. Nếu không thấy máy
 
 1. Cho máy tính và điện thoại vào cùng mạng Wi-Fi. Trên máy tính, vào **Nhận** → **Hiện mã QR**.
 2. Quét QR bằng điện thoại, kiểm tra địa chỉ IP trong liên kết là của máy tính mình rồi chọn **Kết nối với Relay**. Liên kết chỉ dùng một lần và hết hạn sau **10 phút**; phiên điện thoại kéo dài tối đa **1 giờ**.
-3. **Điện thoại → máy tính:** trên trang điện thoại, chọn **Gửi lên máy tính**, chọn tệp và gửi. Trong lúc truyền, có thể chọn **Hủy gửi** trên điện thoại hoặc **Hủy nhận** trên máy tính; phần tệp đang gửi dở sẽ không được giữ lại. Tệp hoàn tất xuất hiện ở **Tệp nhận gần đây** và **Lịch sử** trên máy tính, trong thư mục `From phone` bên trong nơi lưu tệp nhận.
+3. **Điện thoại → máy tính:** Relay tự nhận diện model từ trình duyệt khi kết nối; nếu model bị ẩn, dùng tên loại thiết bị như `iPhone` hoặc `Điện thoại Android`. Trình duyệt không cung cấp tên cá nhân đã đặt trong Cài đặt điện thoại. Trên trang điện thoại, chọn **Gửi lên máy tính**, chọn tệp và gửi. Trong lúc truyền, có thể chọn **Hủy gửi** trên điện thoại hoặc **Hủy nhận** trên máy tính; phần tệp đang gửi dở sẽ không được giữ lại. Tệp hoàn tất xuất hiện ở **Tệp nhận gần đây** và **Lịch sử**, trong thư mục theo tên thiết bị bên trong nơi lưu tệp nhận.
 4. **Máy tính → điện thoại:** chọn tệp trên màn **Gửi** của máy tính. Trên điện thoại, vào **Tải về điện thoại** để mở hoặc tải tệp đã chuẩn bị. Không cần bấm nút gửi tới một máy tính khác.
 5. Khi xong, chọn **Ngắt kết nối** trên máy tính để thu hồi phiên điện thoại.
 

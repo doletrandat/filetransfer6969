@@ -7,6 +7,7 @@
   <title>Relay — Kết nối điện thoại</title>
   <link rel="icon" type="image/svg+xml" href="/static/relay-mark.svg">
   <link rel="stylesheet" href="/static/phone.css?v={{ static_version }}">
+  <script src="/static/phone-connect.js?v={{ static_version }}" defer></script>
 </head>
 <body>
   <header class="phone-header">
@@ -30,6 +31,7 @@
     <p>Xác nhận ghép nối thiết bị. Đảm bảo điện thoại và máy tính đang dùng chung một mạng Wi-Fi.</p>
     <form class="card connect-card" action="/phone/connect" method="post">
       <input type="hidden" name="invite" value="{{ invite }}">
+      <input type="hidden" name="device_model" id="phoneDeviceModel" value="">
       <button class="primary" type="submit">Kết nối với Relay</button>
       <span>Bạn có thể gửi ảnh, video lên máy tính và tải tệp về điện thoại trực tiếp. Phiên kết nối có hiệu lực trong 1 giờ.</span>
     </form>

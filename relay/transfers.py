@@ -85,6 +85,15 @@ def safe_join(root: Path, relative_path: str) -> Path:
     return candidate
 
 
+def device_folder_name(name: str) -> str:
+    cleaned = INVALID_WINDOWS_CHARACTERS.sub("_", name).strip(" .")[:80].rstrip(" .")
+    if not cleaned:
+        cleaned = "Relay device"
+    if cleaned.split(".")[0].upper() in RESERVED_WINDOWS_NAMES:
+        cleaned = f"_{cleaned}"
+    return cleaned
+
+
 @dataclass(frozen=True, slots=True)
 class StagedItem:
     id: str
@@ -143,6 +152,7 @@ class OutgoingTransfer:
     peer_name: str
     item_ids: list[str]
     total_bytes: int
+    retain_staged: bool = False
     sent_bytes: int = 0
     speed_bps: float = 0
     completed_item_ids: list[str] = field(default_factory=list)
@@ -163,6 +173,7 @@ class OutgoingTransfer:
             "peer_name": self.peer_name,
             "item_ids": self.item_ids,
             "total_bytes": self.total_bytes,
+            "retain_staged": self.retain_staged,
             "sent_bytes": self.sent_bytes,
             "speed_bps": self.speed_bps,
             "completed_item_ids": self.completed_item_ids,
@@ -526,6 +537,8 @@ class TransferManager:
         peer_id: str,
         batch_name: str,
         item_ids: list[str],
+        *,
+        retain_staged: bool = False,
     ) -> OutgoingTransfer:
         with self._lock:
             peer = self._peers.get(peer_id)
@@ -575,6 +588,7 @@ class TransferManager:
             peer_name=peer.name,
             item_ids=[item.id for item in items],
             total_bytes=sum(item.size for item in items),
+            retain_staged=retain_staged,
             completed_item_ids=remote.completed_item_ids,
             sent_bytes=sum(item.size for item in items if item.id in remote.completed_item_ids),
             sample_bytes=sum(item.size for item in items if item.id in remote.completed_item_ids),
@@ -719,7 +733,8 @@ class TransferManager:
             self._require_outgoing_active(transfer)
             transfer.current_item_id = ""
             transfer.status = "complete"
-            self._clear_completed_staging(transfer.item_ids, transfer.completed_item_ids)
+            if not transfer.retain_staged:
+                self._clear_completed_staging(transfer.item_ids, transfer.completed_item_ids)
         except TransferCancelled as error:
             transfer.status = "cancelled"
             transfer.error = str(error) or "This transfer was cancelled."
@@ -795,7 +810,9 @@ class TransferManager:
         if len(set(identifiers)) != len(identifiers) or len(set(paths)) != len(paths):
             raise TransferError("The transfer manifest contains duplicate files.")
         with self._lock:
-            destination = self._settings.load().destination.resolve()
+            destination = safe_join(
+                self._settings.load().destination, device_folder_name(request.source.name)
+            )
             reserved = {
                 str(item.target).casefold()
                 for transfer in self._incoming.values()
@@ -1133,6 +1150,7 @@ class TransferManager:
                     peer_name=str(record["peer_name"]),
                     item_ids=list(record["item_ids"]),
                     total_bytes=int(record["total_bytes"]),
+                    retain_staged=bool(record.get("retain_staged", False)),
                     sent_bytes=int(record["sent_bytes"]),
                     completed_item_ids=list(record["completed_item_ids"]),
                     destination=str(record["destination"]),

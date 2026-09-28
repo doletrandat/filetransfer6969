@@ -25,7 +25,13 @@ from relay.config import SettingsStore, get_local_addresses, load_or_create_iden
 from relay.discovery import DiscoveryManager
 from relay.models import IncomingManifestRequest
 from relay.network import PeerConnectionError
-from relay.phone import PHONE_COOKIE_NAME, PHONE_SESSION_TTL_SECONDS, PhoneAccess, PhoneSession
+from relay.phone import (
+    PHONE_COOKIE_NAME,
+    PHONE_SESSION_TTL_SECONDS,
+    PhoneAccess,
+    PhoneSession,
+    detect_phone_name,
+)
 from relay.security import AuthorizedPeer, PairingError, PairingRegistry, SessionRegistry
 from relay.transfers import TransferCancelled, TransferError, TransferManager
 
@@ -244,9 +250,15 @@ def create_app(context: AppContext) -> FastAPI:
 
     @app.post("/phone/connect")
     def connect_phone(
+        request: Request,
         invite: Annotated[str, Form(min_length=20, max_length=100)],
+        device_model: Annotated[str, Form(max_length=80)] = "",
     ) -> RedirectResponse:
-        redeemed = context.phone.redeem(invite)
+        device_name = detect_phone_name(
+            request.headers.get("user-agent", ""), device_model,
+            request.headers.get("sec-ch-ua-model", ""),
+        )
+        redeemed = context.phone.redeem(invite, device_name)
         if redeemed is None:
             raise HTTPException(status_code=403, detail="This phone link has expired or was used.")
         cookie, _ = redeemed
@@ -403,6 +415,9 @@ def create_app(context: AppContext) -> FastAPI:
             "status": status(),
             "devices": devices(),
             "peers": peers(),
+            "receiving_peers": [
+                {"id": peer.id, "name": peer.name} for peer in context.sessions.list_peers()
+            ],
             "staged": staged(),
             "outgoing": outgoing_transfers(),
             "incoming": incoming_transfers(),
@@ -593,6 +608,7 @@ def create_app(context: AppContext) -> FastAPI:
                 str(payload.get("peer_id", "")),
                 str(payload.get("batch_name", "Relay transfer")),
                 [str(item_id) for item_id in payload.get("item_ids", [])],
+                retain_staged=payload.get("retain_staged") is True,
             )
         except (TransferError, ValueError) as error:
             raise HTTPException(status_code=400, detail=str(error)) from error

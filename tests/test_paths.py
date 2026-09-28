@@ -6,6 +6,7 @@ import pytest
 
 from relay.transfers import (
     UnsafePathError,
+    device_folder_name,
     safe_join,
     sanitize_relative_path,
 )
@@ -34,3 +35,12 @@ def test_sanitize_relative_path_rejects_escapes(value: str) -> None:
 
 def test_safe_join_stays_inside_root(tmp_path: Path) -> None:
     assert safe_join(tmp_path, "folder/file.txt") == (tmp_path / "folder" / "file.txt").resolve()
+
+
+@pytest.mark.parametrize("name", ["../Other/PC", "C:\\escape", "CON.txt", "...", "A" * 200])
+def test_device_names_are_single_safe_folders(tmp_path: Path, name: str) -> None:
+    folder = device_folder_name(name)
+    target = safe_join(tmp_path, folder)
+    assert target.parent == tmp_path.resolve()
+    assert len(folder) <= 81
+    assert folder.split(".")[0].upper() != "CON"

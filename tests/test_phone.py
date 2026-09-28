@@ -11,7 +11,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from relay.app import build_app
-from relay.phone import PHONE_COOKIE_NAME, PhoneAccess, PhoneSession
+from relay.phone import PHONE_COOKIE_NAME, PhoneAccess, PhoneSession, detect_phone_name
 from relay.transfers import TransferCancelled
 
 
@@ -26,6 +26,7 @@ def clients(tmp_path: Path) -> tuple[FastAPI, TestClient, TestClient]:
     app.state.context.advertised_address = "192.168.1.10"
     local = TestClient(app, base_url="https://127.0.0.1:9876", client=("127.0.0.1", 50000))
     phone = TestClient(app, base_url="https://192.168.1.10:9876", client=("192.168.1.20", 50000))
+    phone.headers["user-agent"] = "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X)"
     return app, local, phone
 
 
@@ -110,7 +111,7 @@ def test_phone_upload_and_download_are_authorized_and_path_safe(tmp_path: Path) 
             headers=headers,
         ).status_code == 400
 
-        received = app.state.context.settings.load().destination / "From phone"
+        received = app.state.context.settings.load().destination / "iPhone"
         assert (received / "photo.jpg").read_bytes() == b"image"
         assert (received / "photo (2).jpg").read_bytes() == b"second image"
         assert not (tmp_path / "escape.txt").exists()
@@ -177,9 +178,9 @@ def test_phone_sessions_share_one_folder_and_preview_safely(tmp_path: Path) -> N
         assert second.json()["name"] == "page (2).html"
 
         root = app.state.context.settings.load().destination
-        assert [folder.name for folder in root.iterdir() if folder.is_dir()] == ["From phone"]
-        assert (root / "From phone" / "page.html").read_bytes() == b"<script>1</script>"
-        assert (root / "From phone" / "page (2).html").read_bytes() == b"different"
+        assert [folder.name for folder in root.iterdir() if folder.is_dir()] == ["iPhone"]
+        assert (root / "iPhone" / "page.html").read_bytes() == b"<script>1</script>"
+        assert (root / "iPhone" / "page (2).html").read_bytes() == b"different"
         preview = local.get(f"/api/v1/received/phone/{first.json()['id']}")
         assert preview.status_code == 200
         assert preview.headers["content-type"].startswith("text/plain")
@@ -301,6 +302,47 @@ def test_phone_upload_can_be_cancelled_from_receiver(tmp_path: Path) -> None:
     assert not list(tmp_path.rglob("*.part"))
     assert not list(tmp_path.rglob("video.mp4"))
     assert access.transfer_activity()[0]["status"] == "cancelled"
+
+
+@pytest.mark.parametrize(
+    ("user_agent", "model", "header", "expected"),
+    [
+        ("Mozilla/5.0 (Linux; Android 10; K)", "Pixel 9", "", "Pixel 9"),
+        ("Mozilla/5.0 (Linux; Android 10; K)", "", '"SM-S928B"', "SM-S928B"),
+        ("Mozilla/5.0 (Linux; Android 14; Pixel 8 Build/AP1A)", "", "", "Pixel 8"),
+        ("Mozilla/5.0 (Linux; U; Android 9; en-us; SM-G960F Build/PPR1)",
+         "", "", "SM-G960F"),
+        ("Mozilla/5.0 (Linux; Android 10; K)", "", "", "Điện thoại Android"),
+        ("Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X)", "", "", "iPhone"),
+        ("Mozilla/5.0 (iPad; CPU OS 18_0 like Mac OS X)", "", "", "iPad"),
+        ("", "", "invalid-json", "Điện thoại"),
+    ],
+)
+def test_detect_phone_name(user_agent: str, model: str, header: str, expected: str) -> None:
+    assert detect_phone_name(user_agent, model, header) == expected
+
+
+def test_detected_phone_appears_in_connection_and_receives_in_its_folder(tmp_path: Path) -> None:
+    app, local, phone = clients(tmp_path)
+    with local, phone:
+        token = invite(local, app)
+        response = phone.post(
+            "/phone/connect", data={
+                "invite": token, "device_model": "Pixel 9", "device_name": "Ignored name",
+            },
+            follow_redirects=False,
+        )
+        assert response.status_code == 303
+        session = app.state.context.phone.get_session(phone.cookies.get(PHONE_COOKIE_NAME))
+        assert session is not None
+        uploaded = asyncio.run(app.state.context.phone.receive_file(
+            session, tmp_path / "received", "photo.jpg", stream_bytes(b"photo")
+        ))
+        assert Path(uploaded["path"]) == tmp_path / "received" / "Pixel 9" / "photo.jpg"
+        assert Path(uploaded["path"]).read_bytes() == b"photo"
+        snapshot = local.get("/api/v1/state").json()
+        assert snapshot["phone_connection"]["devices"] == [{"name": "Pixel 9"}]
+        assert snapshot["phone_uploads"][0]["device_name"] == "Pixel 9"
 
 
 def test_existing_phone_folder_is_imported_once(tmp_path: Path) -> None:

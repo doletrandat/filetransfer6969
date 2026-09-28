@@ -11,6 +11,14 @@
   <script src="/static/app.js?v={{ static_version }}" defer></script>
 </head>
 <body>
+  <dialog id="notificationDialog" class="notification-dialog" aria-labelledby="notificationTitle">
+    <h2 id="notificationTitle">Bật thông báo nhận tệp?</h2>
+    <p>Nhận thông báo khi có tệp mới gửi đến máy này.</p>
+    <div class="notification-actions">
+      <button class="button ghost" id="dismissNotificationsButton" type="button">Để sau</button>
+      <button class="button primary" id="enableNotificationsButton" type="button">Bật thông báo</button>
+    </div>
+  </dialog>
   <div class="app-shell">
     <aside class="sidebar" aria-label="Điều hướng chính">
       <div class="sidebar-brand-wrapper">
@@ -55,6 +63,16 @@
           <span>Lịch sử</span>
         </button>
       </nav>
+      <div class="sidebar-details">
+        <section aria-labelledby="connectedDevicesTitle">
+          <h2 id="connectedDevicesTitle">Đang kết nối</h2>
+          <div id="connectedDevicesList"></div>
+        </section>
+        <section aria-labelledby="sidebarProgressTitle">
+          <h2 id="sidebarProgressTitle">Đang thực hiện</h2>
+          <div id="sidebarProgressList"></div>
+        </section>
+      </div>
     </aside>
 
     <div class="workspace">
@@ -68,10 +86,6 @@
           <div class="connection-pill" id="systemStatusPill" role="status">
             <span class="signal-lamp" id="systemStatusLamp" aria-hidden="true"></span>
             <span id="systemStatusText">Trực tuyến</span>
-          </div>
-          <div class="connection-pill is-phone" id="phoneHeaderStatus" hidden>
-            <span class="signal-lamp" aria-hidden="true"></span>
-            <span>Điện thoại kết nối</span>
           </div>
         </div>
       </header>
@@ -168,13 +182,6 @@
               </div>
               <div class="receipt-actions">
                 <span class="count-badge" id="phoneUploadCount">0 lượt</span>
-                <button class="button ghost" id="enableNotificationsButton" type="button">
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                    <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/>
-                    <path d="M13.73 21a2 2 0 0 1-3.46 0"/>
-                  </svg>
-                  <span>Bật thông báo</span>
-                </button>
               </div>
             </div>
             <div id="phoneUploadsList" class="receive-list" aria-live="polite">

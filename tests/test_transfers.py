@@ -64,9 +64,10 @@ def test_staging_and_incoming_file_are_verified(tmp_path: Path) -> None:
     assert hashlib.sha256(content).hexdigest() == staged.sha256
 
 
-def test_incoming_uses_receive_root_without_creating_batch_folders(tmp_path: Path) -> None:
+def test_incoming_groups_by_sender_without_creating_batch_folders(tmp_path: Path) -> None:
     settings = SettingsStore(tmp_path / "data")
-    root = settings.load().destination
+    root = settings.load().destination / "Remote PC"
+    root.mkdir()
     (root / "report.txt").write_bytes(b"existing")
     manager = TransferManager(
         tmp_path / "data", settings,
@@ -121,7 +122,7 @@ def test_concurrent_incoming_transfers_reserve_distinct_files(tmp_path: Path) ->
         transfers.append((manager.create_incoming(request), item_id, content))
     for transfer, item_id, content in transfers:
         asyncio.run(manager.receive_file(transfer.transfer_id, item_id, stream_bytes(content)))
-    root = settings.load().destination
+    root = settings.load().destination / "Remote PC"
     assert (root / "note.txt").read_bytes() == b"first"
     assert (root / "note (2).txt").read_bytes() == b"second"
 
@@ -143,7 +144,7 @@ def test_incoming_does_not_replace_a_file_created_during_transfer(tmp_path: Path
         )],
     )
     transfer = manager.create_incoming(manifest)
-    root = settings.load().destination
+    root = settings.load().destination / "Remote PC"
     (root / "note.txt").write_bytes(b"local content")
     asyncio.run(manager.receive_file(transfer.transfer_id, "file-1", stream_bytes(content)))
     assert (root / "note.txt").read_bytes() == b"local content"

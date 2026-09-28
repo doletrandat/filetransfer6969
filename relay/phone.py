@@ -19,6 +19,7 @@ from relay.transfers import (
     MAX_FILE_SIZE,
     TransferCancelled,
     TransferError,
+    device_folder_name,
     safe_join,
     sanitize_relative_path,
 )
@@ -29,10 +30,38 @@ PHONE_COOKIE_NAME = "relay_phone_session"
 PHONE_ACTIVE_SECONDS = 15
 
 
+def detect_phone_name(user_agent: str, model: str = "", model_header: str = "") -> str:
+    if not model and model_header:
+        with suppress(ValueError):
+            hint = json.loads(model_header)
+            if isinstance(hint, str):
+                model = hint
+    model = re.sub(r"[\x00-\x1f\x7f]", "", model).strip()[:80]
+    if model and model.casefold() not in {"k", "unknown"}:
+        return model
+    if "iPad" in user_agent:
+        return "iPad"
+    if "iPhone" in user_agent or "iPod" in user_agent:
+        return "iPhone" if "iPhone" in user_agent else "iPod"
+    android = re.search(r"Android[^;)]*;([^)]*)", user_agent)
+    if android:
+        for segment in reversed(android.group(1).split(";")):
+            candidate = segment.split(" Build/", 1)[0].strip()
+            if (
+                candidate and candidate.casefold() not in {"k", "wv", "u", "unknown"}
+                and not re.fullmatch(r"[a-z]{2}(?:[-_][a-zA-Z]{2})?", candidate)
+            ):
+                return re.sub(r"[\x00-\x1f\x7f]", "", candidate)[:80]
+    if "Android" in user_agent:
+        return "Điện thoại Android"
+    return "Điện thoại"
+
+
 @dataclass(slots=True)
 class PhoneSession:
     csrf_token: str
     expires_at: float
+    device_name: str = "From phone"
     connected_at: float = 0.0
     last_seen_at: float = 0.0
     uploaded: list[dict[str, Any]] = field(default_factory=list)
@@ -61,6 +90,7 @@ class PhoneUpload:
             "error": self.error,
             "received_at": self.created_at,
             "source": "phone",
+            "device_name": self.session.device_name,
         }
 
 
@@ -90,6 +120,7 @@ class PhoneAccess:
                 return {
                     "status": "connected",
                     "connected_at": max(session.connected_at for session in active),
+                    "devices": [{"name": session.device_name} for session in active],
                 }
             if self._invite_digest is not None and self._invite_expires_at > now:
                 return {"status": "waiting", "connected_at": None}
@@ -104,7 +135,9 @@ class PhoneAccess:
             self._sessions.clear()
         return token, expiry
 
-    def redeem(self, token: str) -> tuple[str, PhoneSession] | None:
+    def redeem(
+        self, token: str, device_name: str = "From phone"
+    ) -> tuple[str, PhoneSession] | None:
         with self._lock:
             digest = self._invite_digest
             if (
@@ -122,6 +155,7 @@ class PhoneAccess:
                 expires_at=now + PHONE_SESSION_TTL_SECONDS,
                 connected_at=now,
                 last_seen_at=now,
+                device_name=device_name.strip()[:80] or "From phone",
             )
             self._sessions[self._digest(cookie)] = session
             return cookie, session
@@ -253,7 +287,9 @@ class PhoneAccess:
         with self._lock:
             if upload_id in self._transfers:
                 raise TransferError("That phone transfer is already in progress.")
-            target, part_path = self._reserve_target(destination_root, filename)
+            target, part_path = self._reserve_target(
+                destination_root, filename, session.device_name
+            )
             upload = PhoneUpload(
                 id=upload_id,
                 name=target.name,
@@ -306,6 +342,7 @@ class PhoneAccess:
                     "folder": target.parent.name,
                     "path": str(target),
                     "received_at": time.time(),
+                    "device_name": session.device_name,
                 }
                 session.uploaded.append(result)
                 self._history.insert(0, result)
@@ -340,13 +377,13 @@ class PhoneAccess:
             print(f"Could not save phone upload history: {error}")
 
     def _reserve_target(
-        self, destination_root: Path, filename: str
+        self, destination_root: Path, filename: str, device_name: str = "From phone"
     ) -> tuple[Path, Path]:
         safe_name = sanitize_relative_path(filename)
         if len(safe_name.parts) != 1:
             raise TransferError("Choose a file, not a path.")
         with self._lock:
-            folder = safe_join(destination_root, "From phone")
+            folder = safe_join(destination_root, device_folder_name(device_name))
             folder.mkdir(parents=True, exist_ok=True)
             target = self._available_target(folder, safe_name)
             self._reserved_targets.add(str(target).casefold())
