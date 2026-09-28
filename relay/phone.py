@@ -10,12 +10,14 @@ import threading
 import time
 import uuid
 from collections.abc import AsyncIterable
+from contextlib import suppress
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 from relay.transfers import (
     MAX_FILE_SIZE,
+    TransferCancelled,
     TransferError,
     safe_join,
     sanitize_relative_path,
@@ -36,6 +38,32 @@ class PhoneSession:
     uploaded: list[dict[str, Any]] = field(default_factory=list)
 
 
+@dataclass(slots=True)
+class PhoneUpload:
+    id: str
+    name: str
+    total_size: int
+    session: PhoneSession = field(repr=False)
+    received_bytes: int = 0
+    status: str = "receiving"
+    error: str = ""
+    part_path: Path | None = field(default=None, repr=False)
+    created_at: float = field(default_factory=time.time)
+    updated_at: float = field(default_factory=time.time)
+
+    def public_dict(self) -> dict[str, Any]:
+        return {
+            "id": self.id,
+            "name": self.name,
+            "size": self.total_size,
+            "received_bytes": self.received_bytes,
+            "status": self.status,
+            "error": self.error,
+            "received_at": self.created_at,
+            "source": "phone",
+        }
+
+
 class PhoneAccess:
     def __init__(self, data_dir: Path) -> None:
         self._lock = threading.RLock()
@@ -49,6 +77,7 @@ class PhoneAccess:
         self._invite_expires_at = 0.0
         self._sessions: dict[str, PhoneSession] = {}
         self._reserved_targets: set[str] = set()
+        self._transfers: dict[str, PhoneUpload] = {}
 
     def connection_state(self) -> dict[str, Any]:
         now = time.time()
@@ -124,6 +153,12 @@ class PhoneAccess:
             self._invite_digest = None
             self._invite_expires_at = 0.0
             self._sessions.clear()
+            active = [
+                upload.id for upload in self._transfers.values()
+                if upload.status == "receiving"
+            ]
+        for upload_id in active:
+            self.cancel_upload(upload_id)
 
     def uploaded_files(self, session: PhoneSession) -> list[dict[str, Any]]:
         with self._lock:
@@ -139,6 +174,33 @@ class PhoneAccess:
             except OSError:
                 item["available"] = False
         return uploads
+
+    def transfer_activity(self) -> list[dict[str, Any]]:
+        with self._lock:
+            transfers = [
+                upload.public_dict()
+                for upload in self._transfers.values()
+                if upload.status != "complete"
+            ]
+        return sorted(transfers, key=lambda item: item["received_at"], reverse=True)
+
+    def cancel_upload(
+        self, upload_id: str, session: PhoneSession | None = None
+    ) -> PhoneUpload:
+        with self._lock:
+            upload = self._transfers.get(upload_id)
+            if upload is None or (session is not None and upload.session is not session):
+                raise TransferError("That phone transfer is no longer available.")
+            if upload.status != "receiving":
+                raise TransferError("Only an active phone transfer can be cancelled.")
+            upload.status = "cancelled"
+            upload.error = "This phone transfer was cancelled."
+            upload.updated_at = time.time()
+            part_path = upload.part_path
+        if part_path is not None:
+            with suppress(PermissionError):
+                part_path.unlink(missing_ok=True)
+        return upload
 
     def import_existing(self, destination_root: Path) -> None:
         """Make files received by older Relay versions visible in the desktop inbox."""
@@ -179,18 +241,57 @@ class PhoneAccess:
         destination_root: Path,
         filename: str,
         stream: AsyncIterable[bytes],
+        *,
+        upload_id: str | None = None,
+        total_size: int | None = None,
     ) -> dict[str, Any]:
-        target, part_path = self._reserve_target(destination_root, filename)
+        upload_id = upload_id or uuid.uuid4().hex
+        if not re.fullmatch(r"[A-Za-z0-9_-]{16,64}", upload_id):
+            raise TransferError("The phone transfer ID is invalid.")
+        if total_size is not None and (total_size < 0 or total_size > MAX_FILE_SIZE):
+            raise TransferError("The selected file is too large.")
+        with self._lock:
+            if upload_id in self._transfers:
+                raise TransferError("That phone transfer is already in progress.")
+            target, part_path = self._reserve_target(destination_root, filename)
+            upload = PhoneUpload(
+                id=upload_id,
+                name=target.name,
+                total_size=total_size if total_size is not None else 0,
+                session=session,
+                part_path=part_path,
+            )
+            terminal = sorted(
+                (
+                    candidate for candidate in self._transfers.values()
+                    if candidate.status != "receiving"
+                ),
+                key=lambda candidate: candidate.updated_at,
+                reverse=True,
+            )
+            for expired in terminal[50:]:
+                self._transfers.pop(expired.id, None)
+            self._transfers[upload_id] = upload
         digest = hashlib.sha256()
         size = 0
         try:
             with part_path.open("xb") as output:
                 async for chunk in stream:
+                    if upload.status == "cancelled":
+                        raise TransferCancelled(upload.error)
                     size += len(chunk)
                     if size > MAX_FILE_SIZE:
                         raise TransferError("The selected file is too large.")
+                    if total_size is not None and size > total_size:
+                        raise TransferError("The upload is larger than the selected file.")
                     output.write(chunk)
                     digest.update(chunk)
+                    upload.received_bytes = size
+                    upload.updated_at = time.time()
+            if upload.status == "cancelled":
+                raise TransferCancelled(upload.error)
+            if total_size is not None and size != total_size:
+                raise TransferError("The phone upload ended before the file was complete.")
             with self._lock:
                 if target.exists():
                     self._reserved_targets.discard(str(target).casefold())
@@ -210,9 +311,23 @@ class PhoneAccess:
                 self._history.insert(0, result)
                 self._history = self._history[:50]
                 self._save_history()
+                upload.status = "complete"
+                upload.updated_at = time.time()
             return result
+        except TransferCancelled:
+            upload.status = "cancelled"
+            upload.error = upload.error or "This phone transfer was cancelled."
+            upload.updated_at = time.time()
+            raise
+        except Exception:
+            if upload.status == "receiving":
+                upload.status = "failed"
+                upload.error = "The phone transfer was interrupted."
+                upload.updated_at = time.time()
+            raise
         finally:
             part_path.unlink(missing_ok=True)
+            upload.part_path = None
             with self._lock:
                 self._reserved_targets.discard(str(target).casefold())
 

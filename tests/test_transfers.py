@@ -10,7 +10,7 @@ import pytest
 from relay.config import DeviceIdentity, SettingsStore
 from relay.discovery import DiscoveredDevice, DiscoveryManager
 from relay.models import DeviceMessage, IncomingManifestRequest, TransferManifestItem
-from relay.transfers import TransferError, TransferManager
+from relay.transfers import TransferCancelled, TransferError, TransferManager
 
 
 class EmptyDiscovery:
@@ -297,6 +297,43 @@ def test_incoming_chunk_rejects_invalid_digest(tmp_path: Path) -> None:
         )
 
     assert not (Path(transfer.destination) / "file.bin").exists()
+
+
+def test_receiver_can_cancel_incoming_and_remove_partial_file(tmp_path: Path) -> None:
+    manager = TransferManager(
+        tmp_path / "data",
+        SettingsStore(tmp_path / "data"),
+        DeviceIdentity(id="local", name="Local PC", fingerprint="A" * 64),
+        cast(DiscoveryManager, EmptyDiscovery()),
+    )
+    content = b"part one and part two"
+    manifest = IncomingManifestRequest(
+        batch_name="batch",
+        source=DeviceMessage(id="remote", name="Remote PC", fingerprint="B" * 64),
+        items=[TransferManifestItem(
+            id="file-1", relative_path="file.bin", size=len(content),
+            sha256=hashlib.sha256(content).hexdigest(),
+        )],
+    )
+    transfer = manager.create_incoming(manifest)
+    asyncio.run(manager.receive_chunk(
+        transfer.transfer_id, "file-1", 0, len(content), False,
+        stream_bytes(content[:8]),
+    ))
+    item = manager.incoming_status(transfer.transfer_id).items[0]
+    part_path = item.target.with_name(f".{item.target.name}.{item.id}.part")
+    assert part_path.exists()
+
+    cancelled = manager.cancel_incoming(transfer.transfer_id)
+
+    assert cancelled.status == "cancelled"
+    assert not part_path.exists()
+    assert not item.target.exists()
+    with pytest.raises(TransferCancelled, match="receiver cancelled"):
+        asyncio.run(manager.receive_chunk(
+            transfer.transfer_id, "file-1", 8, len(content), True,
+            stream_bytes(content[8:]),
+        ))
 
 
 def test_staged_and_partial_incoming_survive_restart(tmp_path: Path) -> None:

@@ -64,7 +64,10 @@
       </div>
 
       <p class="selection" id="selection" role="status">Chưa chọn tệp.</p>
-      <button class="primary" id="uploadButton" type="button" disabled>Gửi đến máy tính</button>
+      <div class="upload-actions">
+        <button class="primary" id="uploadButton" type="button" disabled>Gửi đến máy tính</button>
+        <button class="danger" id="cancelUploadButton" type="button" hidden>Hủy gửi</button>
+      </div>
       <progress id="uploadProgress" max="100" value="0" hidden></progress>
       <p class="feedback" id="uploadStatus" role="status" aria-live="polite"></p>
 

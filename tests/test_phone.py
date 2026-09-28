@@ -12,6 +12,7 @@ from fastapi.testclient import TestClient
 
 from relay.app import build_app
 from relay.phone import PHONE_COOKIE_NAME, PhoneAccess, PhoneSession
+from relay.transfers import TransferCancelled
 
 
 async def stream_bytes(content: bytes) -> Any:
@@ -270,6 +271,36 @@ def test_phone_invite_expiry_and_interrupted_upload_cleanup(tmp_path: Path) -> N
 
     access.revoke()
     assert access.get_session(cookie) is None
+
+
+def test_phone_upload_can_be_cancelled_from_receiver(tmp_path: Path) -> None:
+    access = PhoneAccess(tmp_path)
+    session = PhoneSession(csrf_token="token", expires_at=9999999999)
+    started = asyncio.Event()
+    release = asyncio.Event()
+
+    async def stream() -> Any:
+        yield b"partial"
+        started.set()
+        await release.wait()
+        yield b"remainder"
+
+    async def run() -> None:
+        task = asyncio.create_task(access.receive_file(
+            session, tmp_path, "video.mp4", stream(),
+            upload_id="phone-upload-123456", total_size=16,
+        ))
+        await started.wait()
+        cancelled = access.cancel_upload("phone-upload-123456")
+        assert cancelled.status == "cancelled"
+        release.set()
+        with pytest.raises(TransferCancelled):
+            await task
+
+    asyncio.run(run())
+    assert not list(tmp_path.rglob("*.part"))
+    assert not list(tmp_path.rglob("video.mp4"))
+    assert access.transfer_activity()[0]["status"] == "cancelled"
 
 
 def test_existing_phone_folder_is_imported_once(tmp_path: Path) -> None:

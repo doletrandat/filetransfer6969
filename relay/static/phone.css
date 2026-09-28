@@ -286,6 +286,24 @@ button, .download-link {
   background-color: var(--blue-dark);
 }
 
+.upload-actions {
+  display: grid;
+  gap: 8px;
+}
+
+.danger {
+  width: 100%;
+  border: 1px solid #fecaca;
+  background-color: var(--error-soft);
+  color: var(--error);
+}
+
+.danger:hover:not(:disabled) {
+  border-color: var(--error);
+  background-color: var(--error);
+  color: #fff;
+}
+
 .secondary, .download-link {
   background-color: var(--surface);
   color: var(--blue);

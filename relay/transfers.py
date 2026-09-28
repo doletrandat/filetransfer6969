@@ -8,6 +8,7 @@ import threading
 import time
 import uuid
 from collections.abc import AsyncIterable
+from contextlib import suppress
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 from typing import Any, Protocol
@@ -36,6 +37,10 @@ RESERVED_WINDOWS_NAMES = {"CON", "PRN", "AUX", "NUL"} | {
 
 
 class TransferError(RuntimeError):
+    pass
+
+
+class TransferCancelled(TransferError):
     pass
 
 
@@ -588,7 +593,11 @@ class TransferManager:
             items = [self._staged.get(item_id) for item_id in transfer.item_ids] if transfer else []
         if transfer is None:
             return
+        if transfer.status == "cancelled":
+            return
         if peer is None or any(item is None for item in items):
+            if transfer.status == "cancelled":
+                return
             transfer.status = "failed"
             transfer.error = (
                 "Pair with the receiver again and make sure the selected files are available."
@@ -597,10 +606,14 @@ class TransferManager:
                 self._save_state()
             return
         available_items = [item for item in items if item is not None]
-        transfer.status = "sending"
-        transfer.error = ""
-        transfer.updated_at = time.time()
+        with self._lock:
+            if transfer.status == "cancelled":
+                return
+            transfer.status = "sending"
+            transfer.error = ""
+            transfer.updated_at = time.time()
         try:
+            self._require_outgoing_active(transfer)
             identity, client = open_peer_client(peer.endpoint, peer.fingerprint)
             if DeviceMessage.model_validate(identity).id != peer.id:
                 raise PeerConnectionError("The device identity changed. Pair again.")
@@ -611,6 +624,8 @@ class TransferManager:
                 )
                 status_response.raise_for_status()
                 remote_status = status_response.json()
+                if remote_status.get("status") == "cancelled":
+                    raise TransferCancelled("The receiver cancelled this transfer.")
                 transfer.completed_item_ids = list(remote_status.get("completed_item_ids", []))
                 transfer.sent_bytes = sum(
                     item.size for item in available_items if item.id in transfer.completed_item_ids
@@ -618,6 +633,7 @@ class TransferManager:
                 transfer.sample_bytes = transfer.sent_bytes
                 transfer.sample_at = time.monotonic()
                 for item in available_items:
+                    self._require_outgoing_active(transfer)
                     if item.id in transfer.completed_item_ids:
                         continue
                     transfer.current_item_id = item.id
@@ -625,6 +641,7 @@ class TransferManager:
                     item_offset = 0
                     with item.path.open("rb") as content:
                         while item_offset < item.size or (item.size == 0 and item_offset == 0):
+                            self._require_outgoing_active(transfer)
                             content.seek(item_offset)
                             chunk = content.read(CHUNK_SIZE)
                             is_final = item_offset + len(chunk) >= item.size
@@ -632,6 +649,7 @@ class TransferManager:
                             response = None
                             for attempt in range(3):
                                 try:
+                                    self._require_outgoing_active(transfer)
                                     response = client.post(
                                         f"{peer.endpoint}/api/v1/remote/transfers/{transfer.id}/files/{item.id}/chunks",
                                         headers={
@@ -646,9 +664,21 @@ class TransferManager:
                                         content=chunk,
                                     )
                                     response.raise_for_status()
+                                    self._require_outgoing_active(transfer)
                                     last_error = None
                                     break
+                                except TransferCancelled:
+                                    raise
                                 except httpx.HTTPError as error:
+                                    if (
+                                        isinstance(error, httpx.HTTPStatusError)
+                                        and error.response.status_code == 409
+                                    ):
+                                        raise TransferCancelled(
+                                            _response_error(
+                                                error, "The receiver cancelled this transfer."
+                                            )
+                                        ) from error
                                     last_error = error
                                     if attempt < 2:
                                         time.sleep(2**attempt)
@@ -675,6 +705,8 @@ class TransferManager:
                 )
                 final_response.raise_for_status()
                 final_status = final_response.json()
+                if final_status.get("status") == "cancelled":
+                    raise TransferCancelled("The receiver cancelled this transfer.")
                 transfer.completed_item_ids = list(final_status.get("completed_item_ids", []))
                 transfer.sent_bytes = max(
                     transfer.sent_bytes,
@@ -684,12 +716,17 @@ class TransferManager:
                         if item.id in transfer.completed_item_ids
                     ),
                 )
+            self._require_outgoing_active(transfer)
             transfer.current_item_id = ""
             transfer.status = "complete"
             self._clear_completed_staging(transfer.item_ids, transfer.completed_item_ids)
+        except TransferCancelled as error:
+            transfer.status = "cancelled"
+            transfer.error = str(error) or "This transfer was cancelled."
         except (httpx.HTTPError, PeerConnectionError, TransferError, ValueError) as error:
-            transfer.status = "failed"
-            transfer.error = str(error)
+            if transfer.status != "cancelled":
+                transfer.status = "failed"
+                transfer.error = str(error)
         finally:
             transfer.updated_at = time.time()
             with self._lock:
@@ -700,7 +737,7 @@ class TransferManager:
             transfer = self._outgoing.get(transfer_id)
             if transfer is None:
                 raise TransferError("That transfer is no longer available.")
-            if transfer.status not in {"failed", "cancelled"}:
+            if transfer.status != "failed":
                 raise TransferError("Only failed transfers can be retried.")
             if transfer.peer_id not in self._peers:
                 raise TransferError("Pair with the receiver again before retrying.")
@@ -711,6 +748,41 @@ class TransferManager:
     def list_outgoing(self) -> list[OutgoingTransfer]:
         with self._lock:
             return sorted(self._outgoing.values(), key=lambda item: item.created_at, reverse=True)
+
+    def cancel_outgoing(self, transfer_id: str) -> OutgoingTransfer:
+        with self._lock:
+            transfer = self._outgoing.get(transfer_id)
+            if transfer is None:
+                raise TransferError("That transfer is no longer available.")
+            if transfer.status not in {"preparing", "sending", "waiting"}:
+                raise TransferError("Only an active transfer can be cancelled.")
+            transfer.status = "cancelled"
+            transfer.error = "You cancelled this transfer."
+            transfer.speed_bps = 0
+            transfer.updated_at = time.time()
+            peer = self._peers.get(transfer.peer_id)
+            self._save_state()
+        if peer is not None:
+            try:
+                identity, client = open_peer_client(peer.endpoint, peer.fingerprint)
+                with client:
+                    if DeviceMessage.model_validate(identity).id == peer.id:
+                        response = client.delete(
+                            f"{peer.endpoint}/api/v1/remote/transfers/{transfer.id}",
+                            headers={"Authorization": f"Bearer {peer.session_token}"},
+                        )
+                        if response.status_code not in {404, 409}:
+                            response.raise_for_status()
+            except (httpx.HTTPError, PeerConnectionError, ValueError):
+                # The local cancellation remains authoritative. If the peer is still
+                # receiving, the sender loop stops before another chunk is sent.
+                pass
+        return transfer
+
+    @staticmethod
+    def _require_outgoing_active(transfer: OutgoingTransfer) -> None:
+        if transfer.status == "cancelled":
+            raise TransferCancelled(transfer.error or "This transfer was cancelled.")
 
     def create_incoming(self, request: IncomingManifestRequest) -> IncomingManifestResponse:
         if any(not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", item.id) for item in request.items):
@@ -818,6 +890,8 @@ class TransferManager:
             )
         if transfer is None or item is None:
             raise TransferError("That incoming file is no longer available.")
+        if transfer.status == "cancelled":
+            raise TransferCancelled(transfer.error or "This transfer was cancelled.")
         transfer.status = "receiving"
         if total_size != item.size:
             raise TransferError("The incoming file size does not match its manifest.")
@@ -843,6 +917,10 @@ class TransferManager:
             try:
                 with part_path.open("ab") as output:
                     async for chunk in stream:
+                        if transfer.status == "cancelled":
+                            raise TransferCancelled(
+                                transfer.error or "This transfer was cancelled."
+                            )
                         if not chunk:
                             continue
                         new_size = item.received_bytes + len(chunk)
@@ -853,12 +931,18 @@ class TransferManager:
                         item.received_bytes = new_size
                         self._record_incoming_progress(transfer, len(chunk))
             except Exception:
-                with part_path.open("r+b") as output:
-                    output.truncate(offset)
+                if part_path.exists():
+                    with part_path.open("r+b") as output:
+                        output.truncate(offset)
                 item.received_bytes = offset
                 item.digest = previous_digest
+                if transfer.status == "cancelled":
+                    part_path.unlink(missing_ok=True)
                 raise
             new_size = item.received_bytes
+        if transfer.status == "cancelled":
+            part_path.unlink(missing_ok=True)
+            raise TransferCancelled(transfer.error or "This transfer was cancelled.")
         if not (final or new_size == item.size):
             transfer.updated_at = time.time()
             with self._lock:
@@ -923,6 +1007,30 @@ class TransferManager:
         with self._lock:
             return sorted(self._incoming.values(), key=lambda item: item.created_at, reverse=True)
 
+    def cancel_incoming(self, transfer_id: str) -> IncomingTransfer:
+        with self._lock:
+            transfer = self._incoming.get(transfer_id)
+            if transfer is None:
+                raise TransferError("That incoming transfer is no longer available.")
+            if transfer.status not in {"receiving", "waiting"}:
+                raise TransferError("Only an active transfer can be cancelled.")
+            transfer.status = "cancelled"
+            transfer.error = "The receiver cancelled this transfer."
+            transfer.speed_bps = 0
+            transfer.updated_at = time.time()
+            partials = [
+                item.target.with_name(f".{item.target.name}.{item.id}.part")
+                for item in transfer.items
+                if not item.completed
+            ]
+            self._save_state()
+        for path in partials:
+            # An in-flight request may still own the file on Windows. It observes
+            # the cancelled status and removes the partial after closing it.
+            with suppress(PermissionError):
+                path.unlink(missing_ok=True)
+        return transfer
+
     def _record_outgoing_progress(self, transfer: OutgoingTransfer, delta: int) -> None:
         now = time.monotonic()
         elapsed = max(now - transfer.sample_at, 0.05)
@@ -974,6 +1082,8 @@ class TransferManager:
                     "source": transfer.source.model_dump(),
                     "destination": str(transfer.destination),
                     "created_at": transfer.created_at,
+                    "status": transfer.status,
+                    "error": transfer.error,
                     "items": [
                         {
                             "id": item.id,
@@ -1026,9 +1136,15 @@ class TransferManager:
                     sent_bytes=int(record["sent_bytes"]),
                     completed_item_ids=list(record["completed_item_ids"]),
                     destination=str(record["destination"]),
-                    status="complete" if record["status"] == "complete" else "failed",
+                    status=(
+                        "complete" if record["status"] == "complete"
+                        else "cancelled" if record["status"] == "cancelled"
+                        else "failed"
+                    ),
                     error=(
                         "" if record["status"] == "complete"
+                        else "This transfer was cancelled."
+                        if record["status"] == "cancelled"
                         else "Relay restarted. Pair with the receiver again, then retry."
                     ),
                     created_at=float(record["created_at"]),
@@ -1072,9 +1188,21 @@ class TransferManager:
                     id=str(record["id"]), batch_name=str(record["batch_name"]),
                     source=DeviceMessage.model_validate(record["source"]),
                     destination=destination, items=items,
-                    status="complete" if all(item.completed for item in items) else "waiting",
+                    status=(
+                        "complete" if all(item.completed for item in items)
+                        else "cancelled" if record.get("status") == "cancelled"
+                        else "waiting"
+                    ),
+                    error=str(record.get("error", "")),
                     created_at=float(record["created_at"]),
                 )
+                if incoming_transfer.status == "cancelled":
+                    for item in items:
+                        if not item.completed:
+                            item.target.with_name(
+                                f".{item.target.name}.{item.id}.part"
+                            ).unlink(missing_ok=True)
+                            item.received_bytes = 0
                 self._incoming[incoming_transfer.id] = incoming_transfer
         except (OSError, ValueError, KeyError, TypeError) as error:
             print(f"Relay could not restore transfer state: {error}")

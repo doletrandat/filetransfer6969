@@ -63,7 +63,7 @@ Sau khi đổi Wi-Fi hoặc được cấp IP mới, khởi động lại Relay 
 2. Trên máy **nhận**, vào **Nhận** → **Tạo mã** để lấy mã ghép nối. Nhiều máy gửi có thể dùng cùng mã trong 10 phút và truyền tệp đồng thời, mỗi máy có phiên riêng.
 3. Trên máy **gửi**, vào **Gửi** → **Ghép nối bằng mã bảo mật hoặc quét QR**. Nhập mã hoặc quét QR, sau đó chọn máy nhận.
 4. Chọn **Chọn tệp**, **Chọn thư mục** hoặc kéo thả tệp vào vùng chọn. Khi danh sách tệp đã chuẩn bị hiện ra, bắt đầu gửi tới máy đã chọn.
-5. Theo dõi **Tiến trình gửi** ngay trên màn **Gửi**: tệp hiện tại, máy nhận, phần trăm, dung lượng đã gửi/tổng, tốc độ, thời gian còn lại ước tính và số tệp hoàn tất. Kết quả và nút **Thử gửi lại** khi lỗi cũng hiện tại đây; **Lịch sử** lưu các lượt gửi/nhận. Tệp nhận mặc định ở `%USERPROFILE%\Downloads\Relay`; có thể đổi tại **Lịch sử → Thư mục lưu tệp nhận**.
+5. Theo dõi **Tiến trình gửi** ngay trên màn **Gửi**: tệp hiện tại, máy nhận, phần trăm, dung lượng đã gửi/tổng, tốc độ, thời gian còn lại ước tính và số tệp hoàn tất. Máy gửi có thể chọn **Hủy gửi**; máy nhận có thể chọn **Hủy nhận** trong danh sách tệp đang nhận. Relay đồng bộ trạng thái **Đã hủy** sang hai đầu và xóa phần tệp chưa hoàn tất. Kết quả và nút **Thử gửi lại** khi lỗi cũng hiện tại đây; **Lịch sử** lưu các lượt gửi/nhận. Tệp nhận mặc định ở `%USERPROFILE%\Downloads\Relay`; có thể đổi tại **Lịch sử → Thư mục lưu tệp nhận**.
 
 Relay dùng Zeroconf/mDNS để tìm máy trong mạng. Nếu không thấy máy nhận, kiểm tra hai máy cùng mạng, cấu hình mạng Windows là **Private** và quyền Firewall. Mã QR của máy tính chứa địa chỉ thiết bị, nên vẫn có thể ghép nối trực tiếp khi mDNS bị chặn nhưng hai máy còn kết nối được với nhau.
 
@@ -71,7 +71,7 @@ Relay dùng Zeroconf/mDNS để tìm máy trong mạng. Nếu không thấy máy
 
 1. Cho máy tính và điện thoại vào cùng mạng Wi-Fi. Trên máy tính, vào **Nhận** → **Hiện mã QR**.
 2. Quét QR bằng điện thoại, kiểm tra địa chỉ IP trong liên kết là của máy tính mình rồi chọn **Kết nối với Relay**. Liên kết chỉ dùng một lần và hết hạn sau **10 phút**; phiên điện thoại kéo dài tối đa **1 giờ**.
-3. **Điện thoại → máy tính:** trên trang điện thoại, chọn **Gửi lên máy tính**, chọn tệp và gửi. Tệp xuất hiện ở **Tệp nhận gần đây** và **Lịch sử** trên máy tính, trong thư mục `From phone` bên trong nơi lưu tệp nhận.
+3. **Điện thoại → máy tính:** trên trang điện thoại, chọn **Gửi lên máy tính**, chọn tệp và gửi. Trong lúc truyền, có thể chọn **Hủy gửi** trên điện thoại hoặc **Hủy nhận** trên máy tính; phần tệp đang gửi dở sẽ không được giữ lại. Tệp hoàn tất xuất hiện ở **Tệp nhận gần đây** và **Lịch sử** trên máy tính, trong thư mục `From phone` bên trong nơi lưu tệp nhận.
 4. **Máy tính → điện thoại:** chọn tệp trên màn **Gửi** của máy tính. Trên điện thoại, vào **Tải về điện thoại** để mở hoặc tải tệp đã chuẩn bị. Không cần bấm nút gửi tới một máy tính khác.
 5. Khi xong, chọn **Ngắt kết nối** trên máy tính để thu hồi phiên điện thoại.
 

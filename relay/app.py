@@ -27,7 +27,7 @@ from relay.models import IncomingManifestRequest
 from relay.network import PeerConnectionError
 from relay.phone import PHONE_COOKIE_NAME, PHONE_SESSION_TTL_SECONDS, PhoneAccess, PhoneSession
 from relay.security import AuthorizedPeer, PairingError, PairingRegistry, SessionRegistry
-from relay.transfers import TransferError, TransferManager
+from relay.transfers import TransferCancelled, TransferError, TransferManager
 
 PACKAGE_DIR = Path(__file__).resolve().parent
 PREVIEW_MEDIA_TYPES = {
@@ -273,10 +273,27 @@ def create_app(context: AppContext) -> FastAPI:
             "expires_at": session.expires_at,
         }
 
+    @app.delete("/phone/api/uploads/{upload_id}")
+    def cancel_phone_upload(
+        upload_id: str,
+        request: Request,
+        session: PhoneSession = Depends(require_phone),
+    ) -> dict[str, Any]:
+        if not secrets.compare_digest(
+            request.headers.get("X-Relay-Phone-Token", ""), session.csrf_token
+        ):
+            raise HTTPException(status_code=403, detail="The phone session could not be verified.")
+        try:
+            return context.phone.cancel_upload(upload_id, session).public_dict()
+        except TransferError as error:
+            raise HTTPException(status_code=409, detail=str(error)) from error
+
     @app.post("/phone/api/files")
     async def phone_upload(
         request: Request,
         filename: Annotated[str, Query(min_length=1, max_length=255)],
+        upload_id: Annotated[str | None, Query(min_length=16, max_length=64)] = None,
+        total_size: Annotated[int | None, Query(ge=0)] = None,
         session: PhoneSession = Depends(require_phone),
     ) -> dict[str, Any]:
         if not secrets.compare_digest(
@@ -289,9 +306,13 @@ def create_app(context: AppContext) -> FastAPI:
                 context.settings.load().destination,
                 filename,
                 request.stream(),
+                upload_id=upload_id,
+                total_size=total_size,
             )
         except ClientDisconnect:
             raise HTTPException(status_code=499, detail="The phone disconnected.") from None
+        except TransferCancelled as error:
+            raise HTTPException(status_code=409, detail=str(error)) from error
         except (TransferError, OSError) as error:
             raise HTTPException(status_code=400, detail=str(error)) from error
 
@@ -385,7 +406,9 @@ def create_app(context: AppContext) -> FastAPI:
             "staged": staged(),
             "outgoing": outgoing_transfers(),
             "incoming": incoming_transfers(),
-            "phone_uploads": context.phone.recent_uploads(),
+            "phone_uploads": (
+                context.phone.transfer_activity() + context.phone.recent_uploads()
+            ),
             "phone_connection": context.phone.connection_state(),
         }
 
@@ -584,6 +607,27 @@ def create_app(context: AppContext) -> FastAPI:
             raise HTTPException(status_code=400, detail=str(error)) from error
         return transfer.public_dict()
 
+    @app.delete("/api/v1/transfers/outgoing/{transfer_id}")
+    def cancel_outgoing_transfer(transfer_id: str) -> dict[str, Any]:
+        try:
+            return context.transfers.cancel_outgoing(transfer_id).public_dict()
+        except TransferError as error:
+            raise HTTPException(status_code=409, detail=str(error)) from error
+
+    @app.delete("/api/v1/transfers/incoming/{transfer_id}")
+    def cancel_incoming_transfer(transfer_id: str) -> dict[str, Any]:
+        try:
+            return context.transfers.cancel_incoming(transfer_id).public_dict()
+        except TransferError as error:
+            raise HTTPException(status_code=409, detail=str(error)) from error
+
+    @app.delete("/api/v1/phone/uploads/{upload_id}")
+    def cancel_phone_upload_from_computer(upload_id: str) -> dict[str, Any]:
+        try:
+            return context.phone.cancel_upload(upload_id).public_dict()
+        except TransferError as error:
+            raise HTTPException(status_code=409, detail=str(error)) from error
+
     @app.get("/api/v1/transfers/outgoing")
     def outgoing_transfers() -> list[dict[str, Any]]:
         return [transfer.public_dict() for transfer in context.transfers.list_outgoing()]
@@ -660,6 +704,8 @@ def create_app(context: AppContext) -> FastAPI:
         try:
             context.transfers.require_incoming_peer(transfer_id, peer.id, peer.fingerprint)
             await context.transfers.receive_file(transfer_id, item_id, request.stream())
+        except TransferCancelled as error:
+            raise HTTPException(status_code=409, detail=str(error)) from error
         except TransferError as error:
             raise HTTPException(status_code=400, detail=str(error)) from error
         return {"received": "true"}
@@ -689,8 +735,21 @@ def create_app(context: AppContext) -> FastAPI:
             )
         except ClientDisconnect:
             return Response(status_code=499)
+        except TransferCancelled as error:
+            raise HTTPException(status_code=409, detail=str(error)) from error
         except (TransferError, OSError) as error:
             raise HTTPException(status_code=400, detail=str(error)) from error
+
+    @app.delete("/api/v1/remote/transfers/{transfer_id}")
+    def remote_cancel_transfer(
+        transfer_id: str,
+        peer: AuthorizedPeer = Depends(require_session),
+    ) -> dict[str, Any]:
+        try:
+            context.transfers.require_incoming_peer(transfer_id, peer.id, peer.fingerprint)
+            return context.transfers.cancel_incoming(transfer_id).public_dict()
+        except TransferError as error:
+            raise HTTPException(status_code=409, detail=str(error)) from error
 
     @app.get("/api/v1/remote/transfers/{transfer_id}")
     def remote_transfer_status(

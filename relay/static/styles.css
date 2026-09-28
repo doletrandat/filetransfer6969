@@ -852,7 +852,8 @@ main {
 
 .row-action,
 .received-file-link,
-.retry-button {
+.retry-button,
+.cancel-button {
   padding: 4px 8px;
   border-radius: var(--radius-xs);
   border: 1px solid var(--border-default);
@@ -868,19 +869,22 @@ main {
 
 .row-action:hover,
 .received-file-link:hover,
-.retry-button:hover {
+.retry-button:hover,
+.cancel-button:hover {
   background-color: var(--accent-subtle);
   border-color: var(--accent-border);
   color: var(--accent-hover);
 }
 
-.retry-button {
+.retry-button,
+.cancel-button {
   color: var(--error);
   border-color: var(--error-border);
   background-color: var(--error-subtle);
 }
 
-.retry-button:hover {
+.retry-button:hover,
+.cancel-button:hover {
   background-color: var(--error);
   color: #ffffff;
 }
@@ -1000,7 +1004,11 @@ main {
   color: var(--error);
 }
 
-.transfer-state:not(.complete):not(.failed) {
+.transfer-state.cancelled {
+  color: var(--text-muted);
+}
+
+.transfer-state:not(.complete):not(.failed):not(.cancelled) {
   color: var(--accent);
 }
 

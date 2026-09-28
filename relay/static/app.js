@@ -15,6 +15,7 @@ const state = {
   pendingPeerName: "",
   connectionError: false,
   retrying: new Set(),
+  cancelling: new Set(),
   uploadProgress: null,
   phoneInvite: null,
   ticketDialogOpen: false,
@@ -315,13 +316,15 @@ function renderSendProgress() {
     const current = state.staged.find((item) => item.id === transfer.current_item_id);
     const complete = transfer.status === "complete";
     const failed = transfer.status === "failed";
-    const label = complete ? "Hoàn tất" : failed ? "Gửi thất bại"
+    const cancelled = transfer.status === "cancelled";
+    const label = complete ? "Hoàn tất" : cancelled ? "Đã hủy" : failed ? "Gửi thất bại"
       : transfer.status === "waiting" ? "Chờ tiếp tục"
         : transfer.status === "preparing" ? "Đang chuẩn bị" : "Đang gửi";
     const fileCount = transfer.item_ids.length;
     const completedCount = complete ? fileCount : transfer.completed_item_ids.length;
-    const fileDetail = current ? `${failed ? "Tệp bị gián đoạn" : "Tệp hiện tại"}: ${current.relative_path}`
+    const fileDetail = current ? `${failed || cancelled ? "Tệp bị gián đoạn" : "Tệp hiện tại"}: ${current.relative_path}`
       : complete ? "Máy nhận đã xác nhận đầy đủ tệp."
+        : cancelled ? "Lượt gửi đã dừng theo yêu cầu."
         : failed ? "Kiểm tra kết nối với máy nhận rồi thử gửi lại." : "Đang chờ máy nhận xác nhận…";
     return `<article class="send-transfer" data-send-transfer="${escapeHtml(transfer.id)}">
       <div class="send-transfer-heading">
@@ -338,8 +341,8 @@ function renderSendProgress() {
         <div><dt>Thời gian đã chạy</dt><dd data-send-field="elapsed"></dd></div>
       </dl>
       <div class="send-transfer-footer"><span>${completedCount}/${fileCount} tệp hoàn tất</span>
-        ${failed ? `<button class="retry-button" type="button" data-retry-transfer="${escapeHtml(transfer.id)}" ${state.retrying.has(transfer.id) ? "disabled" : ""}>${state.retrying.has(transfer.id) ? "Đang thử lại…" : "Thử gửi lại"}</button>` : ""}</div>
-      ${transfer.error ? `<p class="transfer-error">${escapeHtml(transfer.error)}</p>` : ""}
+        ${isSending(transfer) ? `<button class="cancel-button" type="button" data-cancel-transfer="${escapeHtml(transfer.id)}" data-cancel-direction="outgoing" ${state.cancelling.has(transfer.id) ? "disabled" : ""}>${state.cancelling.has(transfer.id) ? "Đang hủy…" : "Hủy gửi"}</button>` : failed ? `<button class="retry-button" type="button" data-retry-transfer="${escapeHtml(transfer.id)}" ${state.retrying.has(transfer.id) ? "disabled" : ""}>${state.retrying.has(transfer.id) ? "Đang thử lại…" : "Thử gửi lại"}</button>` : ""}</div>
+      ${transfer.error && !cancelled ? `<p class="transfer-error">${escapeHtml(transfer.error)}</p>` : ""}
     </article>`;
   }).join(""));
   const now = Date.now() / 1000;
@@ -424,8 +427,9 @@ function transferEntries() {
   const phone = state.phoneUploads.map((item) => ({
     kind: "received", id: `phone:${item.id}`, time: Number(item.received_at) || 0,
     name: item.name, counterpart: "Điện thoại", size: item.size,
-    status: "complete", transferred: item.size, speed: 0,
-    error: "", phoneItem: item, items: [],
+    status: item.status || "complete", transferred: item.received_bytes ?? item.size, speed: 0,
+    error: item.error || "", phoneItem: item.status ? null : item,
+    phoneTransfer: item.status ? item : null, items: [],
   }));
   return [...outgoing, ...incoming, ...phone].sort((a, b) => b.time - a.time);
 }
@@ -433,6 +437,7 @@ function transferEntries() {
 function entryStatus(entry) {
   const label = entry.status === "complete" ? "Hoàn tất"
     : entry.status === "failed" ? "Lỗi"
+      : entry.status === "cancelled" ? "Đã hủy"
       : entry.status === "waiting" ? "Chờ tiếp tục"
         : entry.kind === "sent" ? "Đang gửi" : "Đang nhận";
   const recentlyCompleted = Date.now() - (state.completedAt.get(entry.id) || 0) < 1200;
@@ -440,6 +445,10 @@ function entryStatus(entry) {
 }
 
 function entryActions(entry, includeCopy = false) {
+  if (entry.phoneTransfer && entry.status === "receiving") {
+    const cancelling = state.cancelling.has(`phone:${entry.phoneTransfer.id}`);
+    return `<button class="cancel-button" type="button" data-cancel-phone-upload="${escapeHtml(entry.phoneTransfer.id)}" ${cancelling ? "disabled" : ""}>${cancelling ? "Đang hủy…" : "Hủy nhận"}</button>`;
+  }
   if (entry.phoneItem) {
     const item = entry.phoneItem;
     return item.available
@@ -447,9 +456,17 @@ function entryActions(entry, includeCopy = false) {
       : '<span class="row-meta">Tệp không còn trên máy</span>';
   }
   if (entry.kind === "sent") {
+    if (isSending(entry)) {
+      const cancelling = state.cancelling.has(entry.transferId);
+      return `<button class="cancel-button" type="button" data-cancel-transfer="${escapeHtml(entry.transferId)}" data-cancel-direction="outgoing" ${cancelling ? "disabled" : ""}>${cancelling ? "Đang hủy…" : "Hủy gửi"}</button>`;
+    }
     return entry.status === "failed"
       ? `<button class="retry-button" type="button" data-retry-transfer="${escapeHtml(entry.transferId)}">Thử gửi lại</button>`
       : "";
+  }
+  if (["receiving", "waiting"].includes(entry.status)) {
+    const cancelling = state.cancelling.has(entry.transferId);
+    return `<button class="cancel-button" type="button" data-cancel-transfer="${escapeHtml(entry.transferId)}" data-cancel-direction="incoming" ${cancelling ? "disabled" : ""}>${cancelling ? "Đang hủy…" : "Hủy nhận"}</button>`;
   }
   const completed = entry.items.filter((item) => item.completed);
   return completed.map((item) => item.available
@@ -458,12 +475,12 @@ function entryActions(entry, includeCopy = false) {
 }
 
 function entryProgress(entry) {
-  if (entry.status === "complete" || entry.status === "failed") return "";
+  if (["complete", "failed", "cancelled"].includes(entry.status)) return "";
   return `<div class="transfer-track" role="progressbar" data-progress-entry="${escapeHtml(entry.id)}" aria-label="${escapeHtml(entry.name)}" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><div class="transfer-fill" style="transform: scaleX(0)"></div></div>`;
 }
 
 function syncActiveProgress(container, entries) {
-  const active = new Map(entries.filter((entry) => entry.status !== "complete" && entry.status !== "failed")
+  const active = new Map(entries.filter((entry) => !["complete", "failed", "cancelled"].includes(entry.status))
     .map((entry) => [entry.id, entry]));
   for (const track of container.querySelectorAll("[data-progress-entry]")) {
     const entry = active.get(track.dataset.progressEntry);
@@ -485,14 +502,14 @@ function entryTime(entry) {
 
 function receiveRow(entry) {
   const actions = entryActions(entry, true);
-  const detail = entry.status === "complete" ? `Từ ${escapeHtml(entry.counterpart)}`
+  const detail = ["complete", "failed", "cancelled"].includes(entry.status) ? `Từ ${escapeHtml(entry.counterpart)}`
     : `Từ ${escapeHtml(entry.counterpart)} · <span data-progress-meta="${escapeHtml(entry.id)}"></span>`;
   return `<div class="receive-row">
     <span class="row-direction received" aria-hidden="true">↓</span>
     <div class="row-main"><strong class="row-name" title="${escapeHtml(entry.name)}">${escapeHtml(entry.name)}</strong><span class="row-meta">${detail}</span></div>
     <span class="row-size">${formatBytes(entry.size)}</span><time class="row-time" datetime="${new Date(entry.time * 1000).toISOString()}">${entryTime(entry)}</time>
     <div class="row-actions">${entry.status !== "complete" ? entryStatus(entry) : ""}${actions}</div>
-    ${entryProgress(entry)}${entry.error ? `<p class="transfer-error">${escapeHtml(entry.error)}</p>` : ""}
+    ${entryProgress(entry)}${entry.error && entry.status !== "cancelled" ? `<p class="transfer-error">${escapeHtml(entry.error)}</p>` : ""}
   </div>`;
 }
 
@@ -501,14 +518,14 @@ function historyRow(entry) {
   const completedItems = entry.items.filter((item) => item.completed);
   const showActionsBelow = completedItems.length > 1 || completedItems.some((item) => !item.available)
     || (entry.phoneItem && !entry.phoneItem.available);
-  const detail = `${entry.kind === "sent" ? "Đến" : "Từ"} ${escapeHtml(entry.counterpart)}${entry.status === "complete" ? "" : ` · <span data-progress-meta="${escapeHtml(entry.id)}"></span>`}`;
+  const detail = `${entry.kind === "sent" ? "Đến" : "Từ"} ${escapeHtml(entry.counterpart)}${["complete", "failed", "cancelled"].includes(entry.status) ? "" : ` · <span data-progress-meta="${escapeHtml(entry.id)}"></span>`}`;
   return `<div class="history-row">
     <span class="row-direction ${entry.kind}" aria-hidden="true">${entry.kind === "sent" ? "↑" : "↓"}</span>
     <div class="row-main"><strong class="row-name" title="${escapeHtml(entry.name)}">${escapeHtml(entry.name)}</strong><span class="row-meta">${detail}</span></div>
     <span class="row-size">${formatBytes(entry.size)}</span><time class="row-time" datetime="${new Date(entry.time * 1000).toISOString()}">${entryTime(entry)}</time>
     ${entryStatus(entry)}<div class="row-actions">${showActionsBelow ? "" : actions}</div>
     ${showActionsBelow ? `<div class="row-extra">${actions}</div>` : ""}
-    ${entryProgress(entry)}${entry.error ? `<p class="transfer-error">${escapeHtml(entry.error)}</p>` : ""}
+    ${entryProgress(entry)}${entry.error && entry.status !== "cancelled" ? `<p class="transfer-error">${escapeHtml(entry.error)}</p>` : ""}
   </div>`;
 }
 
@@ -610,7 +627,8 @@ async function refresh() {
     const previousPhoneStatus = state.phoneConnection?.status;
     state.phoneConnection = payload.phone_connection;
     const previousIds = new Set(state.phoneUploads.map((item) => item.id));
-    const newUploads = (payload.phone_uploads || []).filter((item) => !previousIds.has(item.id));
+    const newUploads = (payload.phone_uploads || []).filter((item) =>
+      (!item.status || item.status === "complete") && !previousIds.has(item.id));
     state.phoneUploads = payload.phone_uploads || [];
     for (const transfer of [...state.outgoing.map((item) => ({ ...item, key: `sent:${item.id}` })),
       ...state.incoming.map((item) => ({ ...item, key: `received:${item.id}` }))]) {
@@ -921,6 +939,32 @@ document.addEventListener("click", async (event) => {
   }
 });
 
+document.addEventListener("click", async (event) => {
+  const transferButton = event.target.closest("[data-cancel-transfer]");
+  const phoneButton = event.target.closest("[data-cancel-phone-upload]");
+  if (!transferButton && !phoneButton) return;
+  const key = phoneButton
+    ? `phone:${phoneButton.dataset.cancelPhoneUpload}`
+    : transferButton.dataset.cancelTransfer;
+  if (state.cancelling.has(key)) return;
+  state.cancelling.add(key);
+  renderAll();
+  try {
+    const path = phoneButton
+      ? `/api/v1/phone/uploads/${encodeURIComponent(phoneButton.dataset.cancelPhoneUpload)}`
+      : `/api/v1/transfers/${encodeURIComponent(transferButton.dataset.cancelDirection)}/${encodeURIComponent(transferButton.dataset.cancelTransfer)}`;
+    await api(path, { method: "DELETE", timeoutMs: 15000 });
+    await refresh();
+    showToast(phoneButton || transferButton.dataset.cancelDirection === "incoming"
+      ? "Đã hủy nhận tệp." : "Đã hủy gửi tệp.");
+  } catch (error) {
+    showToast(error.message, true);
+  } finally {
+    state.cancelling.delete(key);
+    renderAll();
+  }
+});
+
 elements.viewSendHistoryButton.addEventListener("click", () => showView("activity"));
 
 elements.clearStagedButton.addEventListener("click", async () => {
@@ -1081,7 +1125,8 @@ async function pollState() {
   }
   window.clearTimeout(refreshTimer);
   const hasActiveTransfer = state.outgoing.some((transfer) => ["preparing", "sending"].includes(transfer.status))
-    || state.incoming.some((transfer) => transfer.status === "receiving");
+    || state.incoming.some((transfer) => ["receiving", "waiting"].includes(transfer.status))
+    || state.phoneUploads.some((transfer) => transfer.status === "receiving");
   const delay = hasActiveTransfer ? 500 : document.hidden ? 5000 : 2000;
   refreshTimer = window.setTimeout(pollState, delay);
 }

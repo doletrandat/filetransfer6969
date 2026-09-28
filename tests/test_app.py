@@ -198,3 +198,44 @@ def test_remote_manifest_must_match_paired_device(tmp_path: Path) -> None:
             f"/api/v1/remote/transfers/{created.json()['transfer_id']}",
             headers={"Authorization": "Bearer other-token"},
         ).status_code == 404
+
+
+def test_receiver_cancel_endpoint_stops_remote_chunks(tmp_path: Path) -> None:
+    app = build_app(tmp_path, 9876)
+    app.state.context.settings.update(str(tmp_path / "received"))
+    peer = AuthorizedPeer(id="sender", name="Sender", fingerprint="A" * 64)
+    app.state.context.sessions.register("session-token", peer)
+    content = b"incoming content"
+    payload = {
+        "batch_name": "batch",
+        "source": {"id": "sender", "name": "Sender", "fingerprint": "A" * 64},
+        "items": [{
+            "id": "file-1", "relative_path": "file.txt", "size": len(content),
+            "sha256": hashlib.sha256(content).hexdigest(),
+        }],
+    }
+    remote_headers = {"Authorization": "Bearer session-token"}
+    remote = TestClient(
+        app, base_url="https://192.168.1.10:9876", client=("192.168.1.20", 50000)
+    )
+    with remote, local_client(app) as local:
+        created = remote.post("/api/v1/remote/transfers", json=payload, headers=remote_headers)
+        transfer_id = created.json()["transfer_id"]
+        assert local.delete(f"/api/v1/transfers/incoming/{transfer_id}").status_code == 403
+        cancelled = local.delete(
+            f"/api/v1/transfers/incoming/{transfer_id}",
+            headers={"X-Relay-Control-Token": app.state.context.control_token},
+        )
+        assert cancelled.status_code == 200
+        assert cancelled.json()["status"] == "cancelled"
+        rejected = remote.post(
+            f"/api/v1/remote/transfers/{transfer_id}/files/file-1/chunks",
+            params={"offset": 0, "total_size": len(content), "final": True},
+            content=content,
+            headers=remote_headers,
+        )
+        assert rejected.status_code == 409
+        assert remote.get(
+            f"/api/v1/remote/transfers/{transfer_id}", headers=remote_headers
+        ).json()["status"] == "cancelled"
+    assert not (tmp_path / "received" / "file.txt").exists()
