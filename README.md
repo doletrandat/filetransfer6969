@@ -63,7 +63,7 @@ Sau khi đổi Wi-Fi hoặc được cấp IP mới, khởi động lại Relay 
 2. Trên máy **nhận**, vào **Nhận** → **Tạo mã** để lấy mã ghép nối. Nhiều máy gửi có thể dùng cùng mã trong 10 phút và truyền tệp đồng thời, mỗi máy có phiên riêng.
 3. Trên máy **gửi**, vào **Gửi** → **Ghép nối bằng mã bảo mật hoặc quét QR**. Nhập mã hoặc quét QR, sau đó chọn máy nhận.
 4. Chọn **Chọn tệp**, **Chọn thư mục** hoặc kéo thả tệp vào vùng chọn. Khi danh sách tệp đã chuẩn bị hiện ra, bắt đầu gửi tới máy đã chọn.
-5. Xem tiến độ và kết quả trong **Lịch sử** trên hai máy. Tệp nhận mặc định ở `%USERPROFILE%\Downloads\Relay`; có thể đổi tại **Lịch sử → Thư mục lưu tệp nhận**.
+5. Theo dõi **Tiến trình gửi** ngay trên màn **Gửi**: tệp hiện tại, máy nhận, phần trăm, dung lượng đã gửi/tổng, tốc độ, thời gian còn lại ước tính và số tệp hoàn tất. Kết quả và nút **Thử gửi lại** khi lỗi cũng hiện tại đây; **Lịch sử** lưu các lượt gửi/nhận. Tệp nhận mặc định ở `%USERPROFILE%\Downloads\Relay`; có thể đổi tại **Lịch sử → Thư mục lưu tệp nhận**.
 
 Relay dùng Zeroconf/mDNS để tìm máy trong mạng. Nếu không thấy máy nhận, kiểm tra hai máy cùng mạng, cấu hình mạng Windows là **Private** và quyền Firewall. Mã QR của máy tính chứa địa chỉ thiết bị, nên vẫn có thể ghép nối trực tiếp khi mDNS bị chặn nhưng hai máy còn kết nối được với nhau.
 

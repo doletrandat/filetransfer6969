@@ -11,6 +11,10 @@ const state = {
   selectedPeerId: null,
   ticket: null,
   uploading: false,
+  sending: false,
+  pendingPeerName: "",
+  connectionError: false,
+  retrying: new Set(),
   uploadProgress: null,
   phoneInvite: null,
   ticketDialogOpen: false,
@@ -76,6 +80,12 @@ const elements = {
   queueSummary: document.querySelector("#queueSummary"),
   clearStagedButton: document.querySelector("#clearStagedButton"),
   sendButton: document.querySelector("#sendButton"),
+  sendProgress: document.querySelector("#sendProgress"),
+  sendProgressSummary: document.querySelector("#sendProgressSummary"),
+  sendProgressList: document.querySelector("#sendProgressList"),
+  sendPending: document.querySelector("#sendPending"),
+  sendConnectionWarning: document.querySelector("#sendConnectionWarning"),
+  viewSendHistoryButton: document.querySelector("#viewSendHistoryButton"),
   historyList: document.querySelector("#historyList"),
   historyFilters: document.querySelectorAll("[data-history-filter]"),
   destinationInput: document.querySelector("#destinationInput"),
@@ -268,9 +278,92 @@ function renderTarget() {
   elements.transferSubtitle.textContent = peer
     ? `Các tệp sẽ được gửi trực tiếp đến ${peer.name}. Tệp đã chọn cũng hiện trên điện thoại đã kết nối để tải về.`
     : "Chọn máy tính đã kết nối để gửi. Nếu gửi cho điện thoại, tệp được chọn sẽ hiện trên điện thoại để tải về.";
-  const ready = Boolean(peer && state.staged.length && !state.uploading);
+  const alreadySending = state.outgoing.some((transfer) => isSending(transfer)
+    && transfer.peer_id === peer?.id
+    && state.staged.some((item) => transfer.item_ids.includes(item.id)));
+  const ready = Boolean(peer && state.staged.length && !state.uploading && !state.sending && !alreadySending);
   elements.sendButton.disabled = !ready;
-  elements.sendButton.querySelector("span").textContent = peer ? `Gửi đến ${peer.name}` : "Chọn máy tính nhận";
+  elements.sendButton.querySelector("span").textContent = state.sending ? "Đang chuẩn bị gửi…"
+    : alreadySending ? `Đang gửi đến ${peer.name}` : peer ? `Gửi đến ${peer.name}` : "Chọn máy tính nhận";
+}
+
+function isSending(transfer) {
+  return ["preparing", "sending", "waiting"].includes(transfer.status);
+}
+
+function formatDuration(seconds) {
+  const value = Math.max(0, Math.ceil(seconds));
+  if (value < 60) return `${value} giây`;
+  if (value < 3600) return `${Math.floor(value / 60)} phút ${value % 60} giây`;
+  return `${Math.floor(value / 3600)} giờ ${Math.floor(value % 3600 / 60)} phút`;
+}
+
+function renderSendProgress() {
+  const ordered = [...state.outgoing].sort((a, b) => b.created_at - a.created_at);
+  const active = ordered.filter(isSending);
+  const transfers = [...active, ...ordered.filter((transfer) => !isSending(transfer)).slice(0, 5)];
+  elements.sendProgress.hidden = !transfers.length && !state.sending;
+  elements.sendProgressSummary.textContent = active.length
+    ? `${active.length} lượt đang gửi · Cập nhật tự động`
+    : "Kết quả các lượt gửi gần đây";
+  elements.sendPending.hidden = !state.sending;
+  elements.sendPending.textContent = state.sending
+    ? `Đang chờ ${state.pendingPeerName} chuẩn bị nhận tệp…` : "";
+  elements.sendConnectionWarning.hidden = !state.connectionError;
+  elements.sendConnectionWarning.textContent = "Mất kết nối với Relay. Tiến trình bên dưới là lần cập nhật gần nhất; đang thử kết nối lại…";
+  setHtmlIfChanged(elements.sendProgressList, transfers.map((transfer) => {
+    const current = state.staged.find((item) => item.id === transfer.current_item_id);
+    const complete = transfer.status === "complete";
+    const failed = transfer.status === "failed";
+    const label = complete ? "Hoàn tất" : failed ? "Gửi thất bại"
+      : transfer.status === "waiting" ? "Chờ tiếp tục"
+        : transfer.status === "preparing" ? "Đang chuẩn bị" : "Đang gửi";
+    const fileCount = transfer.item_ids.length;
+    const completedCount = complete ? fileCount : transfer.completed_item_ids.length;
+    const fileDetail = current ? `${failed ? "Tệp bị gián đoạn" : "Tệp hiện tại"}: ${current.relative_path}`
+      : complete ? "Máy nhận đã xác nhận đầy đủ tệp."
+        : failed ? "Kiểm tra kết nối với máy nhận rồi thử gửi lại." : "Đang chờ máy nhận xác nhận…";
+    return `<article class="send-transfer" data-send-transfer="${escapeHtml(transfer.id)}">
+      <div class="send-transfer-heading">
+        <div class="row-main"><strong class="send-transfer-name">${escapeHtml(transfer.batch_name)}</strong>
+          <span class="send-transfer-peer">Đến ${escapeHtml(transfer.peer_name)} · ${fileCount} tệp</span></div>
+        <span class="transfer-state ${escapeHtml(transfer.status)}" role="status">${label}</span>
+      </div>
+      <div class="send-transfer-detail"><span>${escapeHtml(fileDetail)}</span><strong data-send-field="percent"></strong></div>
+      <div class="transfer-track" role="progressbar" aria-label="Tiến trình gửi ${escapeHtml(transfer.batch_name)}" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><div class="transfer-fill"></div></div>
+      <dl class="send-metrics">
+        <div><dt>Đã gửi / Tổng</dt><dd data-send-field="bytes"></dd></div>
+        <div><dt>Tốc độ</dt><dd data-send-field="speed"></dd></div>
+        <div><dt>Còn lại ước tính</dt><dd data-send-field="eta"></dd></div>
+        <div><dt>Thời gian đã chạy</dt><dd data-send-field="elapsed"></dd></div>
+      </dl>
+      <div class="send-transfer-footer"><span>${completedCount}/${fileCount} tệp hoàn tất</span>
+        ${failed ? `<button class="retry-button" type="button" data-retry-transfer="${escapeHtml(transfer.id)}" ${state.retrying.has(transfer.id) ? "disabled" : ""}>${state.retrying.has(transfer.id) ? "Đang thử lại…" : "Thử gửi lại"}</button>` : ""}</div>
+      ${transfer.error ? `<p class="transfer-error">${escapeHtml(transfer.error)}</p>` : ""}
+    </article>`;
+  }).join(""));
+  const now = Date.now() / 1000;
+  for (const card of elements.sendProgressList.querySelectorAll("[data-send-transfer]")) {
+    const transfer = transfers.find((item) => item.id === card.dataset.sendTransfer);
+    const complete = transfer.status === "complete";
+    const activeTransfer = isSending(transfer);
+    const progress = complete ? 100 : Math.min(99, percent(transfer.sent_bytes, transfer.total_bytes));
+    const recent = !state.connectionError && now - transfer.updated_at < 10;
+    const speed = activeTransfer && recent ? transfer.speed_bps : 0;
+    const remaining = Math.max(0, transfer.total_bytes - transfer.sent_bytes);
+    const values = {
+      percent: `${progress}%`,
+      bytes: `${formatBytes(transfer.sent_bytes)} / ${formatBytes(transfer.total_bytes)}`,
+      speed: activeTransfer ? speed > 0 ? formatSpeed(speed) : "Đang chờ dữ liệu…" : "—",
+      eta: complete ? "Hoàn tất" : !activeTransfer ? "—"
+        : !remaining ? "Chờ xác nhận" : speed > 0 ? `Khoảng ${formatDuration(remaining / speed)}` : "Đang tính…",
+      elapsed: formatDuration((activeTransfer ? now : transfer.updated_at) - transfer.created_at),
+    };
+    for (const [name, value] of Object.entries(values)) card.querySelector(`[data-send-field="${name}"]`).textContent = value;
+    const track = card.querySelector('[role="progressbar"]');
+    track.setAttribute("aria-valuenow", String(progress));
+    track.querySelector(".transfer-fill").style.transform = `scaleX(${progress / 100})`;
+  }
 }
 
 function renderStaged() {
@@ -282,7 +375,8 @@ function renderStaged() {
       ? `${state.staged.length} tệp · ${formatBytes(total)}`
       : "Chưa chọn tệp";
   }
-  elements.clearStagedButton.disabled = !state.staged.length || state.uploading;
+  const busyItems = new Set(state.outgoing.filter(isSending).flatMap((transfer) => transfer.item_ids));
+  elements.clearStagedButton.disabled = !state.staged.length || state.uploading || state.sending || busyItems.size > 0;
   elements.dropZone.classList.toggle("has-files", state.staged.length > 0);
   if (!state.staged.length) {
     elements.stagedList.innerHTML = `<p class="empty-message">${state.uploading ? "Đang thêm tệp…" : "Tệp đã chọn sẽ hiển thị tại đây."}</p>`;
@@ -297,7 +391,7 @@ function renderStaged() {
         <span class="file-card-name" title="${escapeHtml(item.relative_path)}">${escapeHtml(fileName(item.relative_path))}</span>
         <span class="file-card-size">${escapeHtml(item.relative_path)} · ${formatBytes(item.size)}</span>
       </span>
-      <button class="file-card-remove" type="button" data-remove-item="${escapeHtml(item.id)}" aria-label="Bỏ ${escapeHtml(fileName(item.relative_path))}">
+      <button class="file-card-remove" type="button" data-remove-item="${escapeHtml(item.id)}" aria-label="Bỏ ${escapeHtml(fileName(item.relative_path))}" ${state.sending || busyItems.has(item.id) ? 'disabled title="Tệp đang được gửi"' : ""}>
         <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M4 4l12 12M16 4L4 16"></path></svg>
       </button>
     </div>`).join("");
@@ -490,6 +584,7 @@ function renderAll() {
   renderTarget();
   renderStaged();
   renderTransfers();
+  renderSendProgress();
   renderPhoneUploads();
   renderTicket();
 }
@@ -500,6 +595,7 @@ async function refresh() {
   if (refreshPromise) return refreshPromise;
   refreshPromise = (async () => {
     const payload = await api("/api/v1/state");
+    state.connectionError = false;
     const hadSnapshot = state.hasSnapshot;
     const previousStatuses = new Map([
       ...state.outgoing.map((transfer) => [`sent:${transfer.id}`, transfer.status]),
@@ -731,9 +827,13 @@ async function uploadFiles(files) {
 
 async function send() {
   const peer = state.peers.find((candidate) => candidate.id === state.selectedPeerId);
-  if (!peer || !state.staged.length) return;
+  if (!peer || !state.staged.length || elements.sendButton.disabled || state.sending) return;
+  state.sending = true;
+  state.pendingPeerName = peer.name;
+  renderAll();
+  elements.sendProgress.scrollIntoView({ block: "start", behavior: "smooth" });
   try {
-    await api("/api/v1/transfers", {
+    const transfer = await api("/api/v1/transfers", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -742,10 +842,15 @@ async function send() {
         item_ids: state.staged.map((item) => item.id),
       }),
     });
+    state.outgoing = [transfer, ...state.outgoing.filter((item) => item.id !== transfer.id)];
+    renderAll();
     showToast(`Đang gửi tệp đến ${peer.name}.`);
     await refresh();
   } catch (error) {
     showToast(error.message, true);
+  } finally {
+    state.sending = false;
+    renderAll();
   }
 }
 
@@ -797,17 +902,26 @@ elements.stagedList.addEventListener("click", async (event) => {
   }
 });
 
-elements.historyList.addEventListener("click", async (event) => {
+document.addEventListener("click", async (event) => {
   const button = event.target.closest("[data-retry-transfer]");
-  if (!button) return;
+  if (!button || state.retrying.has(button.dataset.retryTransfer)) return;
+  const transferId = button.dataset.retryTransfer;
+  state.retrying.add(transferId);
   button.disabled = true;
+  renderSendProgress();
   try {
-    await api(`/api/v1/transfers/${encodeURIComponent(button.dataset.retryTransfer)}/retry`, { method: "POST" });
+    await api(`/api/v1/transfers/${encodeURIComponent(transferId)}/retry`, { method: "POST", timeoutMs: 120000 });
     await refresh();
   } catch (error) {
     showToast(error.message, true);
+  } finally {
+    state.retrying.delete(transferId);
+    button.disabled = false;
+    renderSendProgress();
   }
 });
+
+elements.viewSendHistoryButton.addEventListener("click", () => showView("activity"));
 
 elements.clearStagedButton.addEventListener("click", async () => {
   try {
@@ -954,6 +1068,8 @@ async function pollState() {
   try {
     await refresh();
   } catch (error) {
+    state.connectionError = true;
+    renderSendProgress();
     setPairMessage(error.message, true);
     if (elements.systemStatusPill) elements.systemStatusPill.classList.add("is-offline");
     if (elements.systemStatusText) elements.systemStatusText.textContent = "Mất kết nối";

@@ -895,6 +895,57 @@ main {
   color: var(--text-muted);
 }
 
+/* Outgoing progress stays visible in the Send view. */
+.send-progress {
+  margin-bottom: 32px;
+  scroll-margin-top: 24px;
+}
+
+.send-progress-heading,
+.send-transfer-heading,
+.send-transfer-detail,
+.send-transfer-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.send-progress-heading { margin-bottom: 14px; }
+.send-progress-heading h2 { font-size: 17px; margin: 0 0 4px; }
+.send-progress-heading .text-button { flex-shrink: 0; }
+.send-progress-list { display: grid; gap: 12px; }
+.send-transfer {
+  min-width: 0;
+  padding: 20px;
+  border: 1px solid var(--accent-border);
+  border-radius: var(--radius-lg);
+  background: var(--bg-surface);
+  box-shadow: var(--shadow-xs);
+}
+.send-transfer-name { font-size: 15px; overflow-wrap: anywhere; }
+.send-transfer-peer { font-size: 13px; color: var(--text-secondary); overflow-wrap: anywhere; }
+.send-transfer-heading { align-items: flex-start; }
+.send-transfer-heading .transfer-state { flex-shrink: 0; }
+.send-transfer-detail { margin: 18px 0 9px; font-size: 12px; color: var(--text-secondary); }
+.send-transfer-detail span { min-width: 0; overflow-wrap: anywhere; }
+.send-transfer-detail strong { color: var(--accent); font-size: 16px; font-variant-numeric: tabular-nums; }
+.send-transfer .transfer-track { height: 6px; }
+.send-transfer .transfer-fill { transform: scaleX(0); }
+.send-metrics { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 16px; margin: 18px 0; }
+.send-metrics dt { font-size: 11px; color: var(--text-muted); margin-bottom: 5px; }
+.send-metrics dd { font-size: 13px; margin: 0; font-weight: 550; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.send-transfer-footer { font-size: 12px; color: var(--text-secondary); }
+.send-transfer .transfer-error { margin-top: 12px; overflow-wrap: anywhere; }
+.send-notice { padding: 12px 16px; margin-bottom: 12px; background: var(--accent-subtle); border-radius: var(--radius-md); color: var(--text-secondary); font-size: 13px; }
+.file-card-remove:disabled { opacity: 0.4; cursor: not-allowed; }
+
+@media (max-width: 700px) {
+  .send-transfer { padding: 16px; }
+  .send-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .send-progress-heading { flex-wrap: wrap; }
+}
+
 /* Progress bar in row */
 .transfer-track {
   grid-column: 2 / -1;

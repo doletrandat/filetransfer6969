@@ -201,6 +201,16 @@
             </div>
           </div>
 
+          <section class="send-progress" id="sendProgress" aria-labelledby="sendProgressTitle" hidden>
+            <div class="send-progress-heading">
+              <div><h2 id="sendProgressTitle">Tiến trình gửi</h2><p id="sendProgressSummary" class="row-meta"></p></div>
+              <button class="text-button" id="viewSendHistoryButton" type="button">Xem lịch sử</button>
+            </div>
+            <p id="sendPending" class="send-notice" role="status" hidden></p>
+            <p id="sendConnectionWarning" class="send-notice" role="status" hidden></p>
+            <div id="sendProgressList" class="send-progress-list"></div>
+          </section>
+
           <section class="send-section" aria-label="Chọn tệp để gửi">
             <div class="drop-zone" id="dropZone" aria-label="Khu vực kéo thả tệp">
               <div class="drop-symbol" aria-hidden="true">
