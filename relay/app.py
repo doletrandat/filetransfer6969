@@ -15,7 +15,6 @@ from fastapi import BackgroundTasks, Depends, FastAPI, Form, Header, HTTPExcepti
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
-from pydantic import BaseModel, Field
 from qrcode.image.pil import PilImage
 from starlette.middleware.base import RequestResponseEndpoint
 from starlette.requests import ClientDisconnect
@@ -32,8 +31,7 @@ from relay.phone import (
     PhoneSession,
     detect_phone_name,
 )
-from relay.security import AuthorizedPeer, PairingError, PairingRegistry, SessionRegistry
-from relay.transfers import TransferCancelled, TransferError, TransferManager
+from relay.transfers import ReceiveOffer, TransferCancelled, TransferError, TransferManager
 
 PACKAGE_DIR = Path(__file__).resolve().parent
 PREVIEW_MEDIA_TYPES = {
@@ -82,12 +80,6 @@ def open_with_default_app(path: Path) -> None:
     os.startfile(str(path))
 
 
-class CodeRequest(BaseModel):
-    code: str = Field(min_length=8, max_length=8)
-    endpoint: str | None = Field(default=None, max_length=300)
-    fingerprint: str | None = Field(default=None, min_length=47, max_length=95)
-
-
 class AppContext:
     def __init__(self, data_dir: Path, port: int) -> None:
         self.data_dir = data_dir
@@ -108,8 +100,6 @@ class AppContext:
             self.addresses,
             port,
         )
-        self.pairing = PairingRegistry()
-        self.sessions = SessionRegistry()
         self.phone = PhoneAccess(data_dir)
         self.discovery = DiscoveryManager(
             device_id=self.identity.id,
@@ -145,15 +135,20 @@ def create_app(context: AppContext) -> FastAPI:
         for name in ("app.js", "styles.css", "phone.js", "phone.css")
     ))
 
-    def require_session(authorization: Annotated[str | None, Header()] = None) -> AuthorizedPeer:
-        if not authorization or not authorization.startswith("Bearer "):
-            raise HTTPException(
-                status_code=401, detail="Pair with this device before transferring."
+    def require_offer(
+        transfer_id: str, authorization: Annotated[str | None, Header()] = None,
+    ) -> ReceiveOffer:
+        try:
+            return context.transfers.verify_offer(
+                transfer_id, (authorization or "").removeprefix("Bearer "),
             )
-        peer = context.sessions.verify(authorization.removeprefix("Bearer "))
-        if peer is None:
-            raise HTTPException(status_code=401, detail="This pairing has expired. Pair again.")
-        return peer
+        except TransferError as error:
+            raise HTTPException(status_code=403, detail=str(error)) from error
+
+    def require_accepted(offer: ReceiveOffer = Depends(require_offer)) -> ReceiveOffer:
+        if offer.status != "accepted":
+            raise HTTPException(status_code=403, detail="Máy nhận chưa chấp nhận lượt gửi này.")
+        return offer
 
     def require_phone(request: Request) -> PhoneSession:
         session = context.phone.get_session(request.cookies.get(PHONE_COOKIE_NAME))
@@ -345,7 +340,6 @@ def create_app(context: AppContext) -> FastAPI:
     @app.get("/api/v1/status")
     def status() -> dict[str, Any]:
         settings = context.settings.load()
-        ticket = context.pairing.ticket
         return {
             "device": {
                 "id": context.identity.id,
@@ -354,8 +348,6 @@ def create_app(context: AppContext) -> FastAPI:
             },
             "addresses": context.addresses,
             "destination": str(settings.destination),
-            "pairing_code": ticket.code if ticket else None,
-            "pairing_expires_at": ticket.expires_at if ticket else None,
         }
 
     @app.put("/api/v1/settings")
@@ -376,51 +368,19 @@ def create_app(context: AppContext) -> FastAPI:
     def devices() -> list[dict[str, Any]]:
         return [device.public_dict() for device in context.discovery.list_devices()]
 
-    @app.post("/api/v1/pairing/code")
-    def create_pairing_code() -> dict[str, Any]:
-        ticket = context.pairing.create_ticket()
-        context.discovery.update_code_hash(ticket.code_hash, context.advertised_address)
-        endpoint = f"https://{context.advertised_address}:{context.port}"
-        payload = (
-            f"relay://pair?endpoint={quote(endpoint)}&code={quote(ticket.code)}"
-            f"&fp={quote(context.identity.fingerprint)}"
-        )
-        image = qrcode.make(payload, image_factory=PilImage)
-        output = io.BytesIO()
-        image.save(output, format="PNG")
-        qr_data_url = "data:image/png;base64," + base64.b64encode(output.getvalue()).decode("ascii")
-        return {
-            "code": ticket.code,
-            "expires_at": ticket.expires_at,
-            "fingerprint": context.identity.fingerprint,
-            "endpoint": endpoint,
-            "qr_data_url": qr_data_url,
-        }
-
-    @app.post("/api/v1/pair")
-    def pair(payload: CodeRequest) -> dict[str, Any]:
-        try:
-            session = context.transfers.pair(
-                payload.code,
-                endpoint=payload.endpoint,
-                fingerprint=payload.fingerprint,
-            )
-        except (TransferError, PeerConnectionError, ValueError) as error:
-            raise HTTPException(status_code=400, detail=str(error)) from error
-        return session.public_dict()
-
     @app.get("/api/v1/state")
     def state_snapshot() -> dict[str, Any]:
         return {
             "status": status(),
             "devices": devices(),
-            "peers": peers(),
             "receiving_peers": [
-                {"id": peer.id, "name": peer.name} for peer in context.sessions.list_peers()
+                transfer.source.model_dump() for transfer in context.transfers.list_incoming()
+                if transfer.status in {"receiving", "waiting"}
             ],
             "staged": staged(),
             "outgoing": outgoing_transfers(),
             "incoming": incoming_transfers(),
+            "incoming_requests": [offer.public_dict() for offer in context.transfers.list_offers()],
             "phone_uploads": (
                 context.phone.transfer_activity() + context.phone.recent_uploads()
             ),
@@ -540,16 +500,6 @@ def create_app(context: AppContext) -> FastAPI:
             computer_upload_path(transfer_id, item_id), download=download
         )
 
-    @app.get("/api/v1/peers")
-    def peers() -> list[dict[str, Any]]:
-        return [peer.public_dict() for peer in context.transfers.list_peers()]
-
-    @app.delete("/api/v1/peers/{peer_id}")
-    def disconnect_peer(peer_id: str) -> dict[str, bool]:
-        if not context.transfers.disconnect_peer(peer_id):
-            raise HTTPException(status_code=404, detail="That device is not connected.")
-        return {"disconnected": True}
-
     @app.get("/api/v1/staged")
     def staged() -> list[dict[str, Any]]:
         return [item.public_dict() for item in context.transfers.list_staged()]
@@ -610,17 +560,18 @@ def create_app(context: AppContext) -> FastAPI:
                 [str(item_id) for item_id in payload.get("item_ids", [])],
                 retain_staged=payload.get("retain_staged") is True,
             )
-        except (TransferError, ValueError) as error:
+        except (TransferError, PeerConnectionError, ValueError) as error:
             raise HTTPException(status_code=400, detail=str(error)) from error
         background_tasks.add_task(context.transfers.run_outgoing, transfer.id)
         return transfer.public_dict()
 
     @app.post("/api/v1/transfers/{transfer_id}/retry")
-    def retry_transfer(transfer_id: str) -> dict[str, Any]:
+    def retry_transfer(transfer_id: str, background_tasks: BackgroundTasks) -> dict[str, Any]:
         try:
             transfer = context.transfers.retry_outgoing(transfer_id)
-        except TransferError as error:
+        except (TransferError, PeerConnectionError) as error:
             raise HTTPException(status_code=400, detail=str(error)) from error
+        background_tasks.add_task(context.transfers.run_outgoing, transfer.id)
         return transfer.public_dict()
 
     @app.delete("/api/v1/transfers/outgoing/{transfer_id}")
@@ -660,65 +611,36 @@ def create_app(context: AppContext) -> FastAPI:
             "fingerprint": context.identity.fingerprint,
         }
 
-    @app.post("/api/v1/remote/pair")
-    def remote_pair(payload: dict[str, Any]) -> dict[str, Any]:
-        try:
-            device = AuthorizedPeer(
-                id=str(payload["device"]["id"]),
-                name=str(payload["device"]["name"]),
-                fingerprint=str(payload["device"]["fingerprint"]),
-            )
-            code = str(payload["code"])
-            token = context.pairing.redeem(code, device)
-        except (KeyError, PairingError) as error:
-            raise HTTPException(status_code=400, detail=str(error)) from error
-        context.sessions.register(token, device)
-        return {
-            "session_token": token,
-            "device": {
-                "id": context.identity.id,
-                "name": context.identity.name,
-                "fingerprint": context.identity.fingerprint,
-            },
-            "expires_in": 3600,
-        }
-
-    @app.delete("/api/v1/remote/session")
-    def remote_disconnect(
-        peer: AuthorizedPeer = Depends(require_session),
-    ) -> dict[str, bool]:
-        return {"disconnected": context.sessions.revoke_peer(peer) > 0}
-
     @app.post("/api/v1/remote/transfers")
-    def remote_start_transfer(
-        payload: dict[str, Any],
-        peer: AuthorizedPeer = Depends(require_session),
-    ) -> dict[str, Any]:
+    def remote_start_transfer(payload: IncomingManifestRequest) -> dict[str, Any]:
         try:
-            request_model = IncomingManifestRequest.model_validate(payload)
-        except ValueError as error:
-            raise HTTPException(
-                status_code=422, detail="The transfer manifest is invalid."
-            ) from error
-        if (
-            request_model.source.id != peer.id
-            or request_model.source.fingerprint.upper() != peer.fingerprint.upper()
-        ):
-            raise HTTPException(status_code=403, detail="The paired device identity did not match.")
-        try:
-            return context.transfers.create_incoming(request_model).model_dump()
+            offer = context.transfers.request_incoming(payload)
+            return {**offer.public_dict(), "token": offer.token}
         except TransferError as error:
             raise HTTPException(status_code=400, detail=str(error)) from error
+
+    @app.post("/api/v1/requests/{transfer_id}/accept")
+    def accept_request(transfer_id: str) -> dict[str, Any]:
+        try:
+            return context.transfers.decide_offer(transfer_id, True).public_dict()
+        except (TransferError, OSError) as error:
+            raise HTTPException(status_code=409, detail=str(error)) from error
+
+    @app.post("/api/v1/requests/{transfer_id}/reject")
+    def reject_request(transfer_id: str) -> dict[str, Any]:
+        try:
+            return context.transfers.decide_offer(transfer_id, False).public_dict()
+        except TransferError as error:
+            raise HTTPException(status_code=409, detail=str(error)) from error
 
     @app.post("/api/v1/remote/transfers/{transfer_id}/files/{item_id}")
     async def remote_receive_file(
         transfer_id: str,
         item_id: str,
         request: Request,
-        peer: AuthorizedPeer = Depends(require_session),
+        offer: ReceiveOffer = Depends(require_accepted),
     ) -> dict[str, str]:
         try:
-            context.transfers.require_incoming_peer(transfer_id, peer.id, peer.fingerprint)
             await context.transfers.receive_file(transfer_id, item_id, request.stream())
         except TransferCancelled as error:
             raise HTTPException(status_code=409, detail=str(error)) from error
@@ -737,10 +659,9 @@ def create_app(context: AppContext) -> FastAPI:
         offset: Annotated[int, Query(ge=0)],
         total_size: Annotated[int, Query(ge=0)],
         final: bool,
-        peer: AuthorizedPeer = Depends(require_session),
+        offer: ReceiveOffer = Depends(require_accepted),
     ) -> dict[str, Any] | Response:
         try:
-            context.transfers.require_incoming_peer(transfer_id, peer.id, peer.fingerprint)
             return await context.transfers.receive_chunk(
                 transfer_id=transfer_id,
                 item_id=item_id,
@@ -758,25 +679,20 @@ def create_app(context: AppContext) -> FastAPI:
 
     @app.delete("/api/v1/remote/transfers/{transfer_id}")
     def remote_cancel_transfer(
-        transfer_id: str,
-        peer: AuthorizedPeer = Depends(require_session),
+        transfer_id: str, offer: ReceiveOffer = Depends(require_offer),
     ) -> dict[str, Any]:
         try:
-            context.transfers.require_incoming_peer(transfer_id, peer.id, peer.fingerprint)
-            return context.transfers.cancel_incoming(transfer_id).public_dict()
+            return context.transfers.cancel_offer(transfer_id)
         except TransferError as error:
             raise HTTPException(status_code=409, detail=str(error)) from error
 
     @app.get("/api/v1/remote/transfers/{transfer_id}")
     def remote_transfer_status(
-        transfer_id: str,
-        peer: AuthorizedPeer = Depends(require_session),
+        transfer_id: str, offer: ReceiveOffer = Depends(require_offer),
     ) -> dict[str, Any]:
-        try:
-            context.transfers.require_incoming_peer(transfer_id, peer.id, peer.fingerprint)
+        if offer.status == "accepted":
             return context.transfers.incoming_status(transfer_id).public_dict()
-        except TransferError as error:
-            raise HTTPException(status_code=404, detail=str(error)) from error
+        return offer.public_dict()
 
     app.mount("/static", StaticFiles(directory=str(PACKAGE_DIR / "static")), name="static")
     return app

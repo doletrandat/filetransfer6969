@@ -4,6 +4,7 @@ import hashlib
 import json
 import os
 import re
+import secrets
 import threading
 import time
 import uuid
@@ -12,12 +13,11 @@ from contextlib import suppress
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 from typing import Any, Protocol
-from urllib.parse import urlparse
 
 import httpx
 
 from relay.config import DeviceIdentity, SettingsStore
-from relay.discovery import DiscoveredDevice, DiscoveryManager
+from relay.discovery import DiscoveryManager
 from relay.models import (
     DeviceMessage,
     IncomingManifestRequest,
@@ -25,8 +25,7 @@ from relay.models import (
     StagedItemMessage,
     TransferManifestItem,
 )
-from relay.network import PeerConnectionError, connection_error_message, open_peer_client
-from relay.security import SESSION_TTL_SECONDS, hash_code
+from relay.network import PeerConnectionError, open_peer_client
 
 CHUNK_SIZE = 1024 * 1024
 MAX_FILE_SIZE = 1024 * 1024 * 1024 * 1024
@@ -255,6 +254,26 @@ class IncomingTransfer:
         }
 
 
+@dataclass(slots=True)
+class ReceiveOffer:
+    id: str
+    manifest: IncomingManifestRequest
+    token: str
+    expires_at: float
+    status: str = "waiting"
+    created_at: float = field(default_factory=time.time)
+
+    def public_dict(self) -> dict[str, Any]:
+        return {
+            "id": self.id, "source": self.manifest.source.model_dump(),
+            "batch_name": self.manifest.batch_name, "status": self.status,
+            "file_count": len(self.manifest.items),
+            "total_bytes": sum(item.size for item in self.manifest.items),
+            "items": [item.model_dump() for item in self.manifest.items],
+            "expires_at": self.expires_at, "created_at": self.created_at,
+        }
+
+
 class TransferManager:
     def __init__(
         self,
@@ -274,7 +293,8 @@ class TransferManager:
         self._uploads: dict[str, ChunkedUpload] = {}
         self._outgoing: dict[str, OutgoingTransfer] = {}
         self._incoming: dict[str, IncomingTransfer] = {}
-        self._peers: dict[str, PeerSession] = {}
+        self._offers: dict[str, ReceiveOffer] = {}
+        self._credentials: dict[str, PeerSession] = {}
         self._lock = threading.RLock()
         self._load_state()
         for orphan in self._staging_dir.glob(".*.part"):
@@ -431,107 +451,6 @@ class TransferManager:
             item.path.unlink(missing_ok=True)
         return len(items)
 
-    def pair(
-        self,
-        code: str,
-        endpoint: str | None = None,
-        fingerprint: str | None = None,
-    ) -> PeerSession:
-        code_hash = hash_code(code)
-        if endpoint and fingerprint:
-            parsed = urlparse(endpoint)
-            if not parsed.hostname or not parsed.port:
-                raise PeerConnectionError("That QR code has an invalid device address.")
-            candidates = [
-                DiscoveredDevice(
-                    id="qr-peer",
-                    name="Nearby device",
-                    host=parsed.hostname,
-                    port=parsed.port,
-                    fingerprint=fingerprint,
-                    code_hash=code_hash,
-                    last_seen=time.time(),
-                )
-            ]
-        else:
-            candidates = self._discovery.find_by_code(code_hash)
-        if not candidates:
-            raise PeerConnectionError(
-                "No nearby device is broadcasting that code. Check the code and try again."
-            )
-        last_error: Exception | None = None
-        for device in candidates:
-            endpoint = f"https://{device.host}:{device.port}"
-            try:
-                identity, client = open_peer_client(endpoint, device.fingerprint)
-                with client:
-                    response = client.post(
-                        f"{endpoint}/api/v1/remote/pair",
-                        json={
-                            "code": code,
-                            "device": self._identity_message().model_dump(),
-                        },
-                    )
-                    response.raise_for_status()
-                    payload = response.json()
-                remote = DeviceMessage.model_validate(payload["device"])
-                if device.id != "qr-peer" and (
-                    remote.id != device.id
-                    or remote.fingerprint.upper() != device.fingerprint.upper()
-                ):
-                    raise PeerConnectionError(
-                        "The nearby device identity did not match its announcement."
-                    )
-                session = PeerSession(
-                    id=remote.id,
-                    name=remote.name,
-                    endpoint=endpoint,
-                    fingerprint=remote.fingerprint,
-                    session_token=payload["session_token"],
-                    expires_at=time.time() + SESSION_TTL_SECONDS,
-                )
-                with self._lock:
-                    self._peers[session.id] = session
-                return session
-            except httpx.HTTPStatusError as error:
-                raise PeerConnectionError(
-                    _response_error(error, "The pairing code was not accepted.")
-                ) from error
-            except httpx.HTTPError as error:
-                last_error = PeerConnectionError(connection_error_message(error))
-            except (ValueError, KeyError) as error:
-                last_error = error
-        if isinstance(last_error, PeerConnectionError):
-            raise last_error
-        raise PeerConnectionError(f"The pairing code was not accepted. {last_error or ''}".strip())
-
-    def list_peers(self) -> list[PeerSession]:
-        now = time.time()
-        with self._lock:
-            expired = [peer_id for peer_id, peer in self._peers.items() if peer.expires_at <= now]
-            for peer_id in expired:
-                del self._peers[peer_id]
-            return sorted(self._peers.values(), key=lambda peer: peer.name.lower())
-
-    def disconnect_peer(self, peer_id: str) -> bool:
-        with self._lock:
-            peer = self._peers.pop(peer_id, None)
-        if peer is None:
-            return False
-        try:
-            identity, client = open_peer_client(peer.endpoint, peer.fingerprint)
-            with client:
-                if DeviceMessage.model_validate(identity).id != peer.id:
-                    return True
-                response = client.delete(
-                    f"{peer.endpoint}/api/v1/remote/session",
-                    headers={"Authorization": f"Bearer {peer.session_token}"},
-                )
-                response.raise_for_status()
-        except (httpx.HTTPError, PeerConnectionError, ValueError):
-            pass
-        return True
-
     def start_outgoing(
         self,
         peer_id: str,
@@ -541,11 +460,13 @@ class TransferManager:
         retain_staged: bool = False,
     ) -> OutgoingTransfer:
         with self._lock:
-            peer = self._peers.get(peer_id)
+            device = next((d for d in self._discovery.list_devices() if d.id == peer_id), None)
             items = [self._staged[item_id] for item_id in item_ids if item_id in self._staged]
-        if peer is None or peer.expires_at <= time.time():
-            raise TransferError("Pair with that device again before sending.")
-        if len(items) != len(set(item_ids)):
+        if device is None:
+            raise TransferError("Không tìm thấy máy nhận. Hãy mở Relay trên máy đó.")
+        peer = PeerSession(device.id, device.name, f"https://{device.host}:{device.port}",
+                           device.fingerprint, "", time.time() + 86400)
+        if not items or len(items) != len(item_ids) or len(set(item_ids)) != len(item_ids):
             raise TransferError("One or more selected files are no longer staged.")
         if len({item.relative_path for item in items}) != len(items):
             raise TransferError("The transfer contains the same path more than once.")
@@ -562,11 +483,10 @@ class TransferManager:
         remote_identity = DeviceMessage.model_validate(identity)
         if remote_identity.id != peer.id:
             client.close()
-            raise PeerConnectionError("The device identity changed. Pair again.")
+            raise PeerConnectionError("Định danh máy nhận đã thay đổi. Hãy tìm lại thiết bị.")
         try:
             response = client.post(
                 f"{peer.endpoint}/api/v1/remote/transfers",
-                headers={"Authorization": f"Bearer {peer.session_token}"},
                 json={
                     "batch_name": batch_name,
                     "source": self._identity_message().model_dump(),
@@ -574,7 +494,14 @@ class TransferManager:
                 },
             )
             response.raise_for_status()
-            remote = IncomingManifestResponse.model_validate(response.json())
+            offer = response.json()
+            if not isinstance(offer, dict) or not offer.get("id") or not offer.get("token"):
+                raise TransferError("Hãy cập nhật Relay trên cả hai máy để dùng xác nhận nhận tệp.")
+            remote = IncomingManifestResponse(
+                transfer_id=offer["id"], completed_item_ids=[], destination="",
+            )
+            peer = PeerSession(peer.id, peer.name, peer.endpoint, peer.fingerprint,
+                               offer["token"], peer.expires_at)
         except (httpx.HTTPError, ValueError) as error:
             raise TransferError(
                 _response_error(error, "The receiver could not prepare the transfer.")
@@ -593,17 +520,18 @@ class TransferManager:
             sent_bytes=sum(item.size for item in items if item.id in remote.completed_item_ids),
             sample_bytes=sum(item.size for item in items if item.id in remote.completed_item_ids),
             destination=remote.destination,
-            status="sending",
+            status="waiting",
         )
         with self._lock:
             self._outgoing[transfer.id] = transfer
+            self._credentials[transfer.id] = peer
             self._save_state()
         return transfer
 
     def run_outgoing(self, transfer_id: str) -> None:
         with self._lock:
             transfer = self._outgoing.get(transfer_id)
-            peer = self._peers.get(transfer.peer_id) if transfer else None
+            peer = self._credentials.get(transfer_id)
             items = [self._staged.get(item_id) for item_id in transfer.item_ids] if transfer else []
         if transfer is None:
             return
@@ -614,7 +542,7 @@ class TransferManager:
                 return
             transfer.status = "failed"
             transfer.error = (
-                "Pair with the receiver again and make sure the selected files are available."
+                "Hãy chọn lại máy nhận và kiểm tra các tệp đã chuẩn bị."
             )
             with self._lock:
                 self._save_state()
@@ -623,23 +551,38 @@ class TransferManager:
         with self._lock:
             if transfer.status == "cancelled":
                 return
-            transfer.status = "sending"
+            transfer.status = "waiting"
             transfer.error = ""
             transfer.updated_at = time.time()
         try:
             self._require_outgoing_active(transfer)
             identity, client = open_peer_client(peer.endpoint, peer.fingerprint)
             if DeviceMessage.model_validate(identity).id != peer.id:
-                raise PeerConnectionError("The device identity changed. Pair again.")
+                raise PeerConnectionError("Định danh máy nhận đã thay đổi. Hãy tìm lại thiết bị.")
             with client:
-                status_response = client.get(
-                    f"{peer.endpoint}/api/v1/remote/transfers/{transfer.id}",
-                    headers={"Authorization": f"Bearer {peer.session_token}"},
-                )
-                status_response.raise_for_status()
-                remote_status = status_response.json()
+                while True:
+                    self._require_outgoing_active(transfer)
+                    status_response = client.get(
+                        f"{peer.endpoint}/api/v1/remote/transfers/{transfer.id}",
+                        headers={"Authorization": f"Bearer {peer.session_token}"},
+                    )
+                    status_response.raise_for_status()
+                    remote_status = status_response.json()
+                    if remote_status.get("status") != "waiting":
+                        break
+                    time.sleep(0.3)
+                self._require_outgoing_active(transfer)
+                if remote_status.get("status") in {"rejected", "expired"}:
+                    transfer.status = remote_status["status"]
+                    transfer.error = (
+                        "Máy nhận đã từ chối lượt gửi." if transfer.status == "rejected"
+                        else "Yêu cầu đã hết hạn. Hãy gửi lại."
+                    )
+                    return
                 if remote_status.get("status") == "cancelled":
                     raise TransferCancelled("The receiver cancelled this transfer.")
+                transfer.status = "sending"
+                transfer.destination = remote_status.get("destination", "")
                 transfer.completed_item_ids = list(remote_status.get("completed_item_ids", []))
                 transfer.sent_bytes = sum(
                     item.size for item in available_items if item.id in transfer.completed_item_ids
@@ -738,7 +681,7 @@ class TransferManager:
         except TransferCancelled as error:
             transfer.status = "cancelled"
             transfer.error = str(error) or "This transfer was cancelled."
-        except (httpx.HTTPError, PeerConnectionError, TransferError, ValueError) as error:
+        except (httpx.HTTPError, PeerConnectionError, TransferError, ValueError, OSError) as error:
             if transfer.status != "cancelled":
                 transfer.status = "failed"
                 transfer.error = str(error)
@@ -754,11 +697,9 @@ class TransferManager:
                 raise TransferError("That transfer is no longer available.")
             if transfer.status != "failed":
                 raise TransferError("Only failed transfers can be retried.")
-            if transfer.peer_id not in self._peers:
-                raise TransferError("Pair with the receiver again before retrying.")
-        self.run_outgoing(transfer_id)
-        with self._lock:
-            return self._outgoing[transfer_id]
+        self._cancel_remote(transfer)
+        return self.start_outgoing(transfer.peer_id, transfer.batch_name, transfer.item_ids,
+                                   retain_staged=transfer.retain_staged)
 
     def list_outgoing(self) -> list[OutgoingTransfer]:
         with self._lock:
@@ -775,8 +716,12 @@ class TransferManager:
             transfer.error = "You cancelled this transfer."
             transfer.speed_bps = 0
             transfer.updated_at = time.time()
-            peer = self._peers.get(transfer.peer_id)
             self._save_state()
+        self._cancel_remote(transfer)
+        return transfer
+
+    def _cancel_remote(self, transfer: OutgoingTransfer) -> None:
+        peer = self._credentials.get(transfer.id)
         if peer is not None:
             try:
                 identity, client = open_peer_client(peer.endpoint, peer.fingerprint)
@@ -792,14 +737,71 @@ class TransferManager:
                 # The local cancellation remains authoritative. If the peer is still
                 # receiving, the sender loop stops before another chunk is sent.
                 pass
-        return transfer
 
     @staticmethod
     def _require_outgoing_active(transfer: OutgoingTransfer) -> None:
         if transfer.status == "cancelled":
             raise TransferCancelled(transfer.error or "This transfer was cancelled.")
 
-    def create_incoming(self, request: IncomingManifestRequest) -> IncomingManifestResponse:
+    def request_incoming(self, request: IncomingManifestRequest) -> ReceiveOffer:
+        self._validate_manifest(request)
+        with self._lock:
+            self.list_offers()
+            if sum(offer.status == "waiting" for offer in self._offers.values()) >= 32:
+                raise TransferError("Máy nhận đang có quá nhiều yêu cầu. Hãy thử lại sau.")
+            if len(self._offers) >= 256:
+                removable = next((key for key, offer in self._offers.items()
+                                  if offer.status in {"rejected", "expired", "cancelled"}
+                                  or (key in self._incoming
+                                      and self._incoming[key].status in {"complete", "cancelled"})),
+                                 None)
+                if removable is None:
+                    raise TransferError("Máy nhận đang bận. Hãy thử lại sau.")
+                del self._offers[removable]
+            offer = ReceiveOffer(uuid.uuid4().hex, request.model_copy(deep=True),
+                                 secrets.token_urlsafe(32), time.time() + 120)
+            self._offers[offer.id] = offer
+            return offer
+
+    def list_offers(self) -> list[ReceiveOffer]:
+        with self._lock:
+            for offer in self._offers.values():
+                if offer.status == "waiting" and offer.expires_at <= time.time():
+                    offer.status = "expired"
+            return list(self._offers.values())
+
+    def verify_offer(self, transfer_id: str, token: str) -> ReceiveOffer:
+        with self._lock:
+            self.list_offers()
+            offer = self._offers.get(transfer_id)
+            if offer is None or not secrets.compare_digest(offer.token, token):
+                raise TransferError("Quyền truy cập lượt gửi không hợp lệ.")
+            return offer
+
+    def decide_offer(self, transfer_id: str, accept: bool) -> ReceiveOffer:
+        with self._lock:
+            self.list_offers()
+            offer = self._offers.get(transfer_id)
+            if offer is None or offer.status != "waiting":
+                raise TransferError("Yêu cầu đã được xử lý hoặc hết hạn.")
+            if accept:
+                self.create_incoming(offer.manifest, transfer_id=offer.id)
+                offer.status = "accepted"
+            else:
+                offer.status = "rejected"
+            return offer
+
+    def cancel_offer(self, transfer_id: str) -> dict[str, Any]:
+        with self._lock:
+            offer = self._offers[transfer_id]
+            if offer.status == "accepted":
+                return self.cancel_incoming(transfer_id).public_dict()
+            if offer.status == "waiting":
+                offer.status = "cancelled"
+            return offer.public_dict()
+
+    @staticmethod
+    def _validate_manifest(request: IncomingManifestRequest) -> None:
         if any(not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", item.id) for item in request.items):
             raise TransferError("The transfer manifest contains an invalid file ID.")
         identifiers = [item.id for item in request.items]
@@ -809,6 +811,11 @@ class TransferManager:
         ]
         if len(set(identifiers)) != len(identifiers) or len(set(paths)) != len(paths):
             raise TransferError("The transfer manifest contains duplicate files.")
+
+    def create_incoming(
+        self, request: IncomingManifestRequest, *, transfer_id: str | None = None,
+    ) -> IncomingManifestResponse:
+        self._validate_manifest(request)
         with self._lock:
             destination = safe_join(
                 self._settings.load().destination, device_folder_name(request.source.name)
@@ -816,6 +823,7 @@ class TransferManager:
             reserved = {
                 str(item.target).casefold()
                 for transfer in self._incoming.values()
+                if transfer.status != "cancelled"
                 for item in transfer.items
                 if not item.completed
             }
@@ -838,7 +846,7 @@ class TransferManager:
                     received_bytes=item.size if completed else 0,
                 ))
             transfer = IncomingTransfer(
-                id=uuid.uuid4().hex,
+                id=transfer_id or uuid.uuid4().hex,
                 batch_name=request.batch_name,
                 source=request.source,
                 destination=destination,
@@ -972,6 +980,7 @@ class TransferManager:
                 reserved = {
                     str(candidate.target).casefold()
                     for incoming in self._incoming.values()
+                    if incoming.status != "cancelled"
                     for candidate in incoming.items
                     if candidate is not item and not candidate.completed
                 }
@@ -1155,15 +1164,16 @@ class TransferManager:
                     completed_item_ids=list(record["completed_item_ids"]),
                     destination=str(record["destination"]),
                     status=(
-                        "complete" if record["status"] == "complete"
+                        record["status"] if record["status"] in {"complete", "rejected", "expired"}
                         else "cancelled" if record["status"] == "cancelled"
                         else "failed"
                     ),
                     error=(
-                        "" if record["status"] == "complete"
+                        str(record.get("error", ""))
+                        if record["status"] in {"complete", "rejected", "expired"}
                         else "This transfer was cancelled."
                         if record["status"] == "cancelled"
-                        else "Relay restarted. Pair with the receiver again, then retry."
+                        else "Relay đã khởi động lại. Thử gửi lại để máy nhận đồng ý lần nữa."
                     ),
                     created_at=float(record["created_at"]),
                     updated_at=float(record["updated_at"]),

@@ -22,7 +22,7 @@ def connection_error_message(error: httpx.HTTPError) -> str:
                 return (
                     "Chứng chỉ HTTPS của máy nhận không khớp địa chỉ IP hiện tại. "
                     "Hãy cập nhật và khởi động lại Relay trên máy nhận, "
-                    "sau đó tạo mã ghép nối mới."
+                    "sau đó chọn lại máy nhận."
                 )
             return (
                 "Không thể xác thực chứng chỉ HTTPS của máy nhận. "

@@ -15,6 +15,7 @@ from check_send_progress import ROOT, open_port, run_server
 from playwright.sync_api import expect, sync_playwright
 
 from relay.app import AppContext, create_app
+from relay.discovery import DiscoveredDevice
 from relay.transfers import device_folder_name
 
 
@@ -45,10 +46,13 @@ def main() -> None:
                 contexts.append(context)
             sender, first, second = contexts
             for receiver in (first, second):
-                ticket = receiver.pairing.create_ticket()
-                sender.transfers.pair(
-                    ticket.code, endpoint=f"https://127.0.0.1:{receiver.port}",
-                    fingerprint=receiver.identity.fingerprint,
+                sender.discovery._devices[receiver.identity.id] = DiscoveredDevice(
+                    receiver.identity.id, receiver.identity.name, "127.0.0.1", receiver.port,
+                    receiver.identity.fingerprint, "", time.time(),
+                )
+                receiver.discovery._devices[sender.identity.id] = DiscoveredDevice(
+                    sender.identity.id, sender.identity.name, "127.0.0.1", sender.port,
+                    sender.identity.fingerprint, "", time.time(),
                 )
                 original = receiver.transfers.receive_chunk
 
@@ -56,12 +60,27 @@ def main() -> None:
                     await asyncio.sleep(0.5)
                     return await _receive(*args, **kwargs)
 
-                receiver.transfers.receive_chunk = slow_receive
+                receiver.transfers.receive_chunk = slow_receive  # type: ignore[method-assign]
             with sync_playwright() as playwright:
                 browser = playwright.chromium.launch(channel="msedge", headless=True)
                 page = browser.new_page(
                     viewport={"width": 1440, "height": 1000}, ignore_https_errors=True,
                 )
+                receiver_pages = {}
+                for receiver in (first, second):
+                    receiver_page = browser.new_page(ignore_https_errors=True)
+                    receiver_page.add_init_script(
+                        "localStorage.setItem('relay-notifications-asked', '1')"
+                    )
+                    receiver_page.goto(f"https://127.0.0.1:{receiver.port}")
+                    receiver_pages[receiver.identity.id] = receiver_page
+
+                def accept_request(receiver: AppContext) -> None:
+                    receiver_page = receiver_pages[receiver.identity.id]
+                    expect(receiver_page.locator("#requestDialog")).to_be_visible(timeout=10000)
+                    receiver_page.locator('[data-decision="accept"]').click()
+                    expect(receiver_page.locator("#requestDialog")).to_be_hidden()
+
                 errors = []
                 page.on("pageerror", lambda error: errors.append(str(error)))
                 # A deterministic permission stub verifies the user-gesture request and persistence.
@@ -100,6 +119,8 @@ def main() -> None:
                 expect(page.locator("#sendButton")).to_have_text("Gửi đến 2 thiết bị")
                 page.locator("#sendButton").click()
                 expect(page.locator("#sidebarProgressList .sidebar-transfer")).to_have_count(2)
+                accept_request(first)
+                accept_request(second)
                 page.screenshot(path=str(screenshots / "desktop.png"), full_page=True)
                 page.set_viewport_size({"width": 390, "height": 844})
                 assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
@@ -133,11 +154,13 @@ def main() -> None:
                 page.locator("#sendButton").click()
                 expect(page.locator("#toast")).to_contain_text("Desktop Beta: Receiver unavailable")
                 expect(page.locator('#deviceList input:checked')).to_have_count(1)
+                accept_request(first)
                 expect(page.locator(".send-transfer .transfer-state.complete")).to_have_count(
                     3, timeout=15000,
                 )
                 page.unroute("**/api/v1/transfers")
                 page.locator("#sendButton").click()
+                accept_request(second)
                 expect(page.locator(".send-transfer .transfer-state.complete")).to_have_count(
                     4, timeout=15000,
                 )
@@ -168,7 +191,7 @@ def main() -> None:
                 def long_names(route: Any) -> None:
                     response = route.fetch()
                     payload = response.json()
-                    for peer in payload["peers"]:
+                    for peer in payload["devices"]:
                         peer["name"] = "Workstation" * 7
                     route.fulfill(response=response, json=payload)
 

@@ -2146,3 +2146,19 @@ main {
     scroll-behavior: auto !important;
   }
 }
+
+/* Per-transfer consent, visible from every view. */
+.request-dialog { width: min(560px, calc(100vw - 32px)); max-height: 85vh; overflow: auto; padding: 28px; border: 1px solid var(--border-default); border-radius: 20px; background: var(--surface, #fff); color: var(--text, #172033); box-shadow: 0 24px 80px #17203333; }
+.request-dialog::backdrop { background: #17203370; backdrop-filter: blur(3px); }
+.request-dialog > p { color: var(--text-muted, #64748b); margin: 10px 0 20px; }
+.receive-request + .receive-request { border-top: 1px solid var(--border-default); margin-top: 22px; padding-top: 22px; }
+.receive-request h3 { font-size: 17px; line-height: 1.5; overflow-wrap: anywhere; }
+.request-files { padding: 0; margin: 18px 0; list-style: none; }
+.request-files li { display: flex; justify-content: space-between; gap: 18px; padding: 7px 0; overflow-wrap: anywhere; font-size: 13px; }
+.request-files span { flex-shrink: 0; color: var(--text-muted, #64748b); }
+.request-actions { display: flex; justify-content: flex-end; gap: 10px; }
+.transfer-state.rejected, .transfer-state.expired { color: var(--text-muted, #64748b); }
+
+.computer-receive .action-body { grid-column: 1 / -1; }
+
+.receive-request .row-meta { white-space: normal; overflow: visible; text-overflow: clip; }

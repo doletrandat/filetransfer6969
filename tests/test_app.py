@@ -11,7 +11,6 @@ from fastapi.testclient import TestClient
 
 from relay.app import build_app
 from relay.models import DeviceMessage, IncomingManifestRequest, TransferManifestItem
-from relay.security import AuthorizedPeer
 
 
 def local_client(app: FastAPI) -> TestClient:
@@ -110,8 +109,8 @@ def test_local_interface_reports_device_status(tmp_path: Path) -> None:
 
     assert state.status_code == 200
     assert set(state.json()) == {
-        "status", "devices", "peers", "staged", "outgoing", "incoming", "phone_uploads",
-        "phone_connection", "receiving_peers"
+        "status", "devices", "staged", "outgoing", "incoming", "phone_uploads",
+        "phone_connection", "receiving_peers", "incoming_requests"
     }
 
 
@@ -137,7 +136,7 @@ def test_local_control_is_private_to_the_device(tmp_path: Path) -> None:
         assert client.post(
             "/api/v1/pairing/code",
             headers={"X-Relay-Control-Token": app.state.context.control_token},
-        ).status_code == 200
+        ).status_code == 404
         assert app.state.context.control_token in client.get("/").text
 
     rebound = TestClient(
@@ -147,64 +146,9 @@ def test_local_control_is_private_to_the_device(tmp_path: Path) -> None:
         assert rebound.get("/api/v1/status").status_code == 403
 
 
-def test_disconnect_peer_requires_local_control(tmp_path: Path) -> None:
-    app = build_app(tmp_path, 9876)
-    with patch.object(app.state.context.transfers, "disconnect_peer", return_value=True) as action:
-        with local_client(app) as client:
-            assert client.delete("/api/v1/peers/device-1").status_code == 403
-            response = client.delete(
-                "/api/v1/peers/device-1",
-                headers={"X-Relay-Control-Token": app.state.context.control_token},
-            )
-        assert response.status_code == 200
-        assert response.json() == {"disconnected": True}
-        action.assert_called_once_with("device-1")
-
-
-def test_remote_manifest_must_match_paired_device(tmp_path: Path) -> None:
-    app = build_app(tmp_path, 9876)
-    peer = AuthorizedPeer(id="sender", name="Sender", fingerprint="A" * 64)
-    app.state.context.sessions.register("session-token", peer)
-    payload = {
-        "batch_name": "batch",
-        "source": {"id": "another-device", "name": "Other", "fingerprint": "B" * 64},
-        "items": [{
-            "id": "file-1", "relative_path": "file.txt", "size": 1, "sha256": "0" * 64
-        }],
-    }
-    remote = TestClient(
-        app, base_url="https://192.168.1.10:9876", client=("192.168.1.20", 50000)
-    )
-    with remote:
-        response = remote.post(
-            "/api/v1/remote/transfers",
-            json=payload,
-            headers={"Authorization": "Bearer session-token"},
-        )
-    assert response.status_code == 403
-
-    payload["source"] = {"id": "sender", "name": "Sender", "fingerprint": "A" * 64}
-    with remote:
-        created = remote.post(
-            "/api/v1/remote/transfers",
-            json=payload,
-            headers={"Authorization": "Bearer session-token"},
-        )
-        assert created.status_code == 200
-        app.state.context.sessions.register(
-            "other-token", AuthorizedPeer(id="other", name="Other", fingerprint="B" * 64)
-        )
-        assert remote.get(
-            f"/api/v1/remote/transfers/{created.json()['transfer_id']}",
-            headers={"Authorization": "Bearer other-token"},
-        ).status_code == 404
-
-
 def test_receiver_cancel_endpoint_stops_remote_chunks(tmp_path: Path) -> None:
     app = build_app(tmp_path, 9876)
     app.state.context.settings.update(str(tmp_path / "received"))
-    peer = AuthorizedPeer(id="sender", name="Sender", fingerprint="A" * 64)
-    app.state.context.sessions.register("session-token", peer)
     content = b"incoming content"
     payload = {
         "batch_name": "batch",
@@ -220,7 +164,12 @@ def test_receiver_cancel_endpoint_stops_remote_chunks(tmp_path: Path) -> None:
     )
     with remote, local_client(app) as local:
         created = remote.post("/api/v1/remote/transfers", json=payload, headers=remote_headers)
-        transfer_id = created.json()["transfer_id"]
+        transfer_id = created.json()["id"]
+        remote_headers = {"Authorization": f"Bearer {created.json()['token']}"}
+        assert local.post(
+            f"/api/v1/requests/{transfer_id}/accept",
+            headers={"X-Relay-Control-Token": app.state.context.control_token},
+        ).status_code == 200
         assert local.delete(f"/api/v1/transfers/incoming/{transfer_id}").status_code == 403
         cancelled = local.delete(
             f"/api/v1/transfers/incoming/{transfer_id}",

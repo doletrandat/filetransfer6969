@@ -1,7 +1,6 @@
 const state = {
   status: null,
   devices: [],
-  peers: [],
   receivingPeers: [],
   staged: [],
   outgoing: [],
@@ -10,7 +9,8 @@ const state = {
   phoneConnection: null,
   hasSnapshot: false,
   selectedPeerIds: new Set(),
-  ticket: null,
+  incomingRequests: [],
+  decidingRequests: new Set(),
   uploading: false,
   sending: false,
   pendingPeerName: "",
@@ -19,7 +19,6 @@ const state = {
   cancelling: new Set(),
   uploadProgress: null,
   phoneInvite: null,
-  ticketDialogOpen: false,
   historyFilter: "all",
   completedAt: new Map(),
 };
@@ -44,11 +43,6 @@ const elements = {
   discoveryText: document.querySelector("#discoveryText"),
   discoveryLamp: document.querySelector("#discoveryLamp"),
   deviceList: document.querySelector("#deviceList"),
-  pairingOptions: document.querySelector("#pairingOptions"),
-  pairForm: document.querySelector("#pairForm"),
-  pairingCode: document.querySelector("#pairingCode"),
-  pairMessage: document.querySelector("#pairMessage"),
-  createCodeButton: document.querySelector("#createCodeButton"),
   phoneConnectButton: document.querySelector("#phoneConnectButton"),
   phoneConnectionStatus: document.querySelector("#phoneConnectionStatus"),
   phoneInvite: document.querySelector("#phoneInvite"),
@@ -63,17 +57,6 @@ const elements = {
   connectedDevicesList: document.querySelector("#connectedDevicesList"),
   sidebarProgressList: document.querySelector("#sidebarProgressList"),
   phoneUploadsList: document.querySelector("#phoneUploadsList"),
-  pairingTicket: document.querySelector("#pairingTicket"),
-  closePairingTicketButton: document.querySelector("#closePairingTicketButton"),
-  pairingQr: document.querySelector("#pairingQr"),
-  ticketCode: document.querySelector("#ticketCode"),
-  ticketCountdown: document.querySelector("#ticketCountdown"),
-  newCodeButton: document.querySelector("#newCodeButton"),
-  scanCodeButton: document.querySelector("#scanCodeButton"),
-  scanPanel: document.querySelector("#scanPanel"),
-  scanVideo: document.querySelector("#scanVideo"),
-  scanMessage: document.querySelector("#scanMessage"),
-  closeScannerButton: document.querySelector("#closeScannerButton"),
   transferSubtitle: document.querySelector("#transferSubtitle"),
   targetStamp: document.querySelector("#targetStamp strong"),
   fileInput: document.querySelector("#fileInput"),
@@ -97,6 +80,8 @@ const elements = {
   settingsForm: document.querySelector("#settingsForm"),
   settingsMessage: document.querySelector("#settingsMessage"),
   fingerprint: document.querySelector("#fingerprint"),
+  requestDialog: document.querySelector("#requestDialog"),
+  requestList: document.querySelector("#requestList"),
   toast: document.querySelector("#toast"),
 };
 
@@ -198,11 +183,6 @@ function showToast(message, error = false) {
   }, 4200);
 }
 
-function setPairMessage(message, error = false) {
-  elements.pairMessage.textContent = message;
-  elements.pairMessage.classList.toggle("error", error);
-}
-
 function renderStatus() {
   if (!state.status) return;
   const { device, addresses, destination } = state.status;
@@ -253,39 +233,29 @@ function renderPhoneConnection() {
 function renderDevices() {
   if (!state.hasSnapshot) return;
   const devices = [...state.devices];
-  for (const peer of state.peers) {
-    if (!devices.some((device) => device.id === peer.id)) {
-      const endpoint = new URL(peer.endpoint);
-      devices.push({ ...peer, host: endpoint.hostname, port: endpoint.port });
-    }
-  }
   if (!devices.length) {
     elements.deviceList.innerHTML = `
       <p class="empty-message">Chưa thấy máy tính nào. Hãy mở Relay trên máy còn lại và kiểm tra cả hai dùng chung mạng.</p>`;
     return;
   }
-  const pairedIds = new Set(state.peers.map((peer) => peer.id));
   setHtmlIfChanged(elements.deviceList, devices.map((device) => {
-    const connected = pairedIds.has(device.id);
     const selected = state.selectedPeerIds.has(device.id);
     return `
       <div class="device-row${selected ? " selected" : ""}">
         <label class="device-select">
-          <input type="checkbox" data-device-id="${escapeHtml(device.id)}" aria-label="Chọn ${escapeHtml(device.name)}" ${selected ? "checked" : ""} ${connected ? "" : "disabled"}>
+          <input type="checkbox" data-device-id="${escapeHtml(device.id)}" aria-label="Chọn ${escapeHtml(device.name)}" ${selected ? "checked" : ""}>
           <span>
             <span class="device-name">${escapeHtml(device.name)}</span>
             <span class="device-address">${escapeHtml(device.host)}:${device.port} · ${escapeHtml(device.fingerprint.slice(0, 11))}</span>
           </span>
-          <span class="device-state">${connected ? "Đã kết nối" : "Chưa kết nối"}</span>
+          <span class="device-state">Sẵn sàng</span>
         </label>
-        ${!connected ? `<button class="text-button" type="button" data-pair-device="${escapeHtml(device.id)}">Kết nối</button>` : ""}
-        ${connected ? `<button class="text-button device-disconnect" type="button" data-disconnect-peer="${escapeHtml(device.id)}">Ngắt kết nối</button>` : ""}
       </div>`;
   }).join(""));
 }
 
 function selectedPeers() {
-  return state.peers.filter((peer) => state.selectedPeerIds.has(peer.id));
+  return state.devices.filter((peer) => state.selectedPeerIds.has(peer.id));
 }
 
 function peerAlreadySending(peer) {
@@ -300,8 +270,8 @@ function renderTarget() {
   elements.targetStamp.textContent = peers.length ? targets : "Chưa chọn";
   elements.targetStamp.title = peers.map((peer) => peer.name).join(", ");
   elements.transferSubtitle.textContent = peers.length
-    ? `Các tệp sẽ được gửi trực tiếp đến ${targets}. Tệp đã chọn cũng hiện trên điện thoại đã kết nối để tải về.`
-    : "Chọn máy tính đã kết nối để gửi. Nếu gửi cho điện thoại, tệp được chọn sẽ hiện trên điện thoại để tải về.";
+    ? `${targets} sẽ được hỏi trước khi nhận tệp. Tệp đã chọn cũng hiện trên điện thoại đã kết nối để tải về.`
+    : "Chọn máy tính trong danh sách để gửi yêu cầu nhận tệp. Nếu gửi cho điện thoại, tệp được chọn sẽ hiện trên điện thoại để tải về.";
   const available = peers.filter((peer) => !peerAlreadySending(peer));
   const ready = Boolean(available.length && state.staged.length && !state.uploading && !state.sending);
   elements.sendButton.disabled = !ready;
@@ -341,7 +311,9 @@ function renderSendProgress() {
     const failed = transfer.status === "failed";
     const cancelled = transfer.status === "cancelled";
     const label = complete ? "Hoàn tất" : cancelled ? "Đã hủy" : failed ? "Gửi thất bại"
-      : transfer.status === "waiting" ? "Chờ tiếp tục"
+      : transfer.status === "rejected" ? "Đã từ chối"
+      : transfer.status === "expired" ? "Hết thời gian chờ"
+      : transfer.status === "waiting" ? "Chờ máy nhận đồng ý"
         : transfer.status === "preparing" ? "Đang chuẩn bị" : "Đang gửi";
     const fileCount = transfer.item_ids.length;
     const completedCount = complete ? fileCount : transfer.completed_item_ids.length;
@@ -454,14 +426,21 @@ function transferEntries() {
     error: item.error || "", phoneItem: item.status ? null : item,
     phoneTransfer: item.status ? item : null, items: [],
   }));
-  return [...outgoing, ...incoming, ...phone].sort((a, b) => b.time - a.time);
+  const requests = state.incomingRequests.filter((offer) => ["rejected", "expired", "cancelled"].includes(offer.status)).map((offer) => ({
+    kind: "received", id: `request:${offer.id}`, time: offer.created_at,
+    name: offer.batch_name, counterpart: offer.source.name, size: offer.total_bytes,
+    status: offer.status, transferred: 0, speed: 0, error: "", items: [],
+  }));
+  return [...outgoing, ...incoming, ...phone, ...requests].sort((a, b) => b.time - a.time);
 }
 
 function entryStatus(entry) {
   const label = entry.status === "complete" ? "Hoàn tất"
     : entry.status === "failed" ? "Lỗi"
       : entry.status === "cancelled" ? "Đã hủy"
-      : entry.status === "waiting" ? "Chờ tiếp tục"
+      : entry.status === "rejected" ? "Đã từ chối"
+      : entry.status === "expired" ? "Hết thời gian chờ"
+      : entry.status === "waiting" ? (entry.kind === "sent" ? "Chờ máy nhận đồng ý" : "Chờ gửi lại")
         : entry.kind === "sent" ? "Đang gửi" : "Đang nhận";
   const recentlyCompleted = Date.now() - (state.completedAt.get(entry.id) || 0) < 1200;
   return `<span class="transfer-state ${escapeHtml(entry.status)}${recentlyCompleted ? " new-complete" : ""}">${entry.status === "complete" ? '<span class="check" aria-hidden="true">✓</span>' : ""}${label}</span>`;
@@ -498,12 +477,12 @@ function entryActions(entry, includeCopy = false) {
 }
 
 function entryProgress(entry) {
-  if (["complete", "failed", "cancelled"].includes(entry.status)) return "";
+  if (["complete", "failed", "cancelled", "rejected", "expired"].includes(entry.status)) return "";
   return `<div class="transfer-track" role="progressbar" data-progress-entry="${escapeHtml(entry.id)}" aria-label="${escapeHtml(entry.name)}" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><div class="transfer-fill" style="transform: scaleX(0)"></div></div>`;
 }
 
 function syncActiveProgress(container, entries) {
-  const active = new Map(entries.filter((entry) => !["complete", "failed", "cancelled"].includes(entry.status))
+  const active = new Map(entries.filter((entry) => !["complete", "failed", "cancelled", "rejected", "expired"].includes(entry.status))
     .map((entry) => [entry.id, entry]));
   for (const track of container.querySelectorAll("[data-progress-entry]")) {
     const entry = active.get(track.dataset.progressEntry);
@@ -525,13 +504,13 @@ function entryTime(entry) {
 
 function receiveRow(entry) {
   const actions = entryActions(entry, true);
-  const detail = ["complete", "failed", "cancelled"].includes(entry.status) ? `Từ ${escapeHtml(entry.counterpart)}`
+  const detail = ["complete", "failed", "cancelled", "rejected", "expired"].includes(entry.status) ? `Từ ${escapeHtml(entry.counterpart)}`
     : `Từ ${escapeHtml(entry.counterpart)} · <span data-progress-meta="${escapeHtml(entry.id)}"></span>`;
   return `<div class="receive-row">
     <span class="row-direction received" aria-hidden="true">↓</span>
     <div class="row-main"><strong class="row-name" title="${escapeHtml(entry.name)}">${escapeHtml(entry.name)}</strong><span class="row-meta">${detail}</span></div>
     <span class="row-size">${formatBytes(entry.size)}</span><time class="row-time" datetime="${new Date(entry.time * 1000).toISOString()}">${entryTime(entry)}</time>
-    <div class="row-actions">${entry.status !== "complete" ? entryStatus(entry) : ""}${actions}</div>
+    <div class="row-actions">${entryStatus(entry)}${actions}</div>
     ${entryProgress(entry)}${entry.error && entry.status !== "cancelled" ? `<p class="transfer-error">${escapeHtml(entry.error)}</p>` : ""}
   </div>`;
 }
@@ -541,7 +520,7 @@ function historyRow(entry) {
   const completedItems = entry.items.filter((item) => item.completed);
   const showActionsBelow = completedItems.length > 1 || completedItems.some((item) => !item.available)
     || (entry.phoneItem && !entry.phoneItem.available);
-  const detail = `${entry.kind === "sent" ? "Đến" : "Từ"} ${escapeHtml(entry.counterpart)}${["complete", "failed", "cancelled"].includes(entry.status) ? "" : ` · <span data-progress-meta="${escapeHtml(entry.id)}"></span>`}`;
+  const detail = `${entry.kind === "sent" ? "Đến" : "Từ"} ${escapeHtml(entry.counterpart)}${["complete", "failed", "cancelled", "rejected", "expired"].includes(entry.status) ? "" : ` · <span data-progress-meta="${escapeHtml(entry.id)}"></span>`}`;
   return `<div class="history-row">
     <span class="row-direction ${entry.kind}" aria-hidden="true">${entry.kind === "sent" ? "↑" : "↓"}</span>
     <div class="row-main"><strong class="row-name" title="${escapeHtml(entry.name)}">${escapeHtml(entry.name)}</strong><span class="row-meta">${detail}</span></div>
@@ -598,7 +577,7 @@ function notifyReceived(message) {
 function renderSidebar() {
   const phones = state.phoneConnection?.status === "connected"
     ? state.phoneConnection.devices || [{ name: "Điện thoại" }] : [];
-  const computers = [...new Map([...state.peers, ...state.receivingPeers].map((peer) => [peer.id, peer])).values()];
+  const computers = [...new Map([...state.devices, ...state.receivingPeers].map((peer) => [peer.id, peer])).values()];
   const devices = [...computers, ...phones];
   setHtmlIfChanged(elements.connectedDevicesList, state.connectionError
     ? '<p class="sidebar-empty">Mất kết nối với Relay</p>'
@@ -607,7 +586,9 @@ function renderSidebar() {
   const active = transferEntries().filter((entry) => ["preparing", "sending", "receiving", "waiting"].includes(entry.status));
   const rows = active.map((entry) => {
     const progress = Math.min(99, percent(entry.transferred, entry.size));
-    const label = state.connectionError ? "Chờ kết nối" : entry.status === "waiting" ? "Chờ tiếp tục" : entry.kind === "sent" ? "Đang gửi" : "Đang nhận";
+    const label = state.connectionError ? "Chờ kết nối" : entry.status === "rejected" ? "Đã từ chối"
+      : entry.status === "expired" ? "Hết thời gian chờ"
+      : entry.status === "waiting" ? (entry.kind === "sent" ? "Chờ máy nhận đồng ý" : "Chờ gửi lại") : entry.kind === "sent" ? "Đang gửi" : "Đang nhận";
     return `<button type="button" class="sidebar-transfer" data-sidebar-view="${entry.kind === "sent" ? "send" : "receive"}">
       <strong>${escapeHtml(entry.counterpart)}</strong><span>${escapeHtml(entry.name)}</span>
       <span class="sidebar-transfer-status">${label} · ${progress}%</span>
@@ -627,25 +608,6 @@ function renderPhoneUploads() {
   syncActiveProgress(elements.phoneUploadsList, entries);
 }
 
-function renderTicket() {
-  if (!state.ticket) {
-    elements.pairingTicket.hidden = true;
-    return;
-  }
-  const remaining = Math.max(0, Math.ceil(state.ticket.expires_at - Date.now() / 1000));
-  if (remaining <= 0) {
-    state.ticket = null;
-    state.ticketDialogOpen = false;
-    elements.pairingTicket.hidden = true;
-    return;
-  }
-  elements.pairingTicket.hidden = !state.ticketDialogOpen;
-  elements.ticketCode.textContent = state.ticket.code;
-  const minutes = Math.floor(remaining / 60);
-  const seconds = String(remaining % 60).padStart(2, "0");
-  elements.ticketCountdown.textContent = `Hết hạn sau ${minutes}:${seconds}`;
-}
-
 function renderAll() {
   renderStatus();
   renderPhoneConnection();
@@ -655,7 +617,7 @@ function renderAll() {
   renderTransfers();
   renderSendProgress();
   renderPhoneUploads();
-  renderTicket();
+  renderRequests();
   renderSidebar();
 }
 
@@ -673,11 +635,11 @@ async function refresh() {
     ]);
     state.status = payload.status;
     state.devices = payload.devices;
-    state.peers = payload.peers;
     state.receivingPeers = payload.receiving_peers || [];
     state.staged = payload.staged;
     state.outgoing = payload.outgoing;
     state.incoming = payload.incoming;
+    state.incomingRequests = payload.incoming_requests || [];
     const previousPhoneStatus = state.phoneConnection?.status;
     state.phoneConnection = payload.phone_connection;
     const previousIds = new Set(state.phoneUploads.map((item) => item.id));
@@ -692,8 +654,7 @@ async function refresh() {
         if (transfer.key.startsWith("received:")) notifyReceived(`Đã nhận ${transfer.batch_name} từ ${transfer.source.name}.`);
       }
     }
-    state.selectedPeerIds = new Set([...state.selectedPeerIds].filter((id) => state.peers.some((peer) => peer.id === id)));
-    if (!hadSnapshot && state.peers.length) state.selectedPeerIds.add(state.peers[0].id);
+    state.selectedPeerIds = new Set([...state.selectedPeerIds].filter((id) => state.devices.some((peer) => peer.id === id)));
     state.hasSnapshot = true;
     renderAll();
     if (hadSnapshot && previousPhoneStatus !== "connected" && state.phoneConnection?.status === "connected") {
@@ -707,19 +668,6 @@ async function refresh() {
     refreshPromise = null;
   });
   return refreshPromise;
-}
-
-async function createCode() {
-  try {
-    state.ticket = await api("/api/v1/pairing/code", { method: "POST" });
-    state.ticketDialogOpen = true;
-    elements.pairingQr.src = state.ticket.qr_data_url;
-    renderTicket();
-    elements.closePairingTicketButton.focus();
-    setPairMessage("Các máy khác có thể quét hoặc nhập cùng mã này trong 10 phút.");
-  } catch (error) {
-    setPairMessage(error.message, true);
-  }
 }
 
 async function connectPhone() {
@@ -752,92 +700,6 @@ async function disconnectPhone() {
   } catch (error) {
     showToast(error.message, true);
   }
-}
-
-async function pairValues(code, endpoint = null, fingerprint = null) {
-  if (code.length !== 8) {
-    setPairMessage("Nhập đủ 8 ký tự của mã ghép nối.", true);
-    return;
-  }
-  setPairMessage("Đang kiểm tra máy tính…");
-  try {
-    const peer = await api("/api/v1/pair", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ code, endpoint, fingerprint }),
-    });
-    state.peers.push(peer);
-    state.selectedPeerIds.add(peer.id);
-    state.ticket = null;
-    state.ticketDialogOpen = false;
-    elements.pairingCode.value = "";
-    setPairMessage(`Đã kết nối với ${peer.name}.`);
-    renderAll();
-  } catch (error) {
-    setPairMessage(error.message, true);
-  }
-}
-
-async function pairDevice(event) {
-  event.preventDefault();
-  await pairValues(elements.pairingCode.value.trim().toUpperCase());
-}
-
-function parsePairingQr(value) {
-  const codeMatch = value.match(/[?&]code=([^&]+)/i);
-  const endpointMatch = value.match(/[?&]endpoint=([^&]+)/i);
-  const fingerprintMatch = value.match(/[?&]fp=([^&]+)/i);
-  if (!codeMatch) return null;
-  return {
-    code: decodeURIComponent(codeMatch[1]).toUpperCase(),
-    endpoint: endpointMatch ? decodeURIComponent(endpointMatch[1]) : null,
-    fingerprint: fingerprintMatch ? decodeURIComponent(fingerprintMatch[1]) : null,
-  };
-}
-
-let scannerFrame = 0;
-let scannerStream = null;
-
-async function scanQrCode() {
-  if (!navigator.mediaDevices?.getUserMedia || !("BarcodeDetector" in window)) {
-    setPairMessage("Trình duyệt không quét được mã QR. Hãy nhập mã ghép nối.", true);
-    return;
-  }
-  try {
-    scannerStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
-    elements.scanVideo.srcObject = scannerStream;
-    elements.scanPanel.hidden = false;
-    elements.scanMessage.textContent = "Hướng camera vào mã QR trên máy nhận.";
-    await elements.scanVideo.play();
-    const detector = new BarcodeDetector({ formats: ["qr_code"] });
-    const scan = async () => {
-      if (!scannerStream) return;
-      const codes = await detector.detect(elements.scanVideo);
-      if (codes.length) {
-        const parsed = parsePairingQr(codes[0].rawValue);
-        if (parsed) {
-          stopScanner();
-          await pairValues(parsed.code, parsed.endpoint, parsed.fingerprint);
-          return;
-        }
-      }
-      scannerFrame = requestAnimationFrame(scan);
-    };
-    scannerFrame = requestAnimationFrame(scan);
-  } catch (error) {
-    stopScanner();
-    setPairMessage("Không mở được camera. Hãy nhập mã ghép nối.", true);
-  }
-}
-
-function stopScanner() {
-  cancelAnimationFrame(scannerFrame);
-  if (scannerStream) {
-    scannerStream.getTracks().forEach((track) => track.stop());
-    scannerStream = null;
-  }
-  elements.scanVideo.srcObject = null;
-  elements.scanPanel.hidden = true;
 }
 
 async function uploadFiles(files) {
@@ -924,7 +786,7 @@ async function send() {
       if (failures.length && results[index].status === "fulfilled") state.selectedPeerIds.delete(peers[index].id);
     }
     showToast(failures.length ? `Đã bắt đầu ${peers.length - failures.length}/${peers.length} lượt gửi. ${failures.join("; ")}`
-      : `Đang gửi tệp đến ${peers.length} thiết bị.`, Boolean(failures.length));
+      : `Đã gửi yêu cầu đến ${peers.length} thiết bị. Đang chờ đồng ý.`, Boolean(failures.length));
     await refresh();
   } catch (error) {
     showToast(error.message, true);
@@ -933,35 +795,6 @@ async function send() {
     renderAll();
   }
 }
-
-elements.deviceList.addEventListener("click", async (event) => {
-  const disconnectButton = event.target.closest("[data-disconnect-peer]");
-  if (disconnectButton) {
-    const peerId = disconnectButton.dataset.disconnectPeer;
-    const peer = state.peers.find((candidate) => candidate.id === peerId);
-    disconnectButton.disabled = true;
-    try {
-      await api(`/api/v1/peers/${encodeURIComponent(peerId)}`, { method: "DELETE" });
-      state.peers = state.peers.filter((candidate) => candidate.id !== peerId);
-      state.selectedPeerIds.delete(peerId);
-      await refresh();
-      showToast(`Đã ngắt kết nối với ${peer?.name || "máy tính"}.`);
-    } catch (error) {
-      disconnectButton.disabled = false;
-      showToast(error.message, true);
-    }
-    return;
-  }
-  const row = event.target.closest("[data-pair-device]");
-  if (!row) return;
-  const device = state.devices.find((item) => item.id === row.dataset.pairDevice);
-  if (device) {
-    setPairMessage(`Nhập mã hiển thị trên ${device.name}.`);
-    elements.pairingOptions.open = true;
-    elements.pairingCode.focus();
-  }
-  renderAll();
-});
 
 elements.deviceList.addEventListener("change", (event) => {
   const checkbox = event.target.closest("[data-device-id]");
@@ -1067,31 +900,22 @@ elements.settingsForm.addEventListener("submit", async (event) => {
   }
 });
 
-elements.pairForm.addEventListener("submit", pairDevice);
-elements.createCodeButton.addEventListener("click", createCode);
 elements.phoneConnectButton.addEventListener("click", connectPhone);
 elements.phoneDisconnectButton.addEventListener("click", disconnectPhone);
 function closeDialog(backdrop) {
   if (backdrop.hidden) return;
   backdrop.hidden = true;
-  if (backdrop === elements.pairingTicket) {
-    state.ticketDialogOpen = false;
-    elements.createCodeButton.focus();
-  } else {
-    elements.phoneConnectButton.focus();
-  }
+  elements.phoneConnectButton.focus();
 }
 elements.closePhoneInviteButton.addEventListener("click", () => closeDialog(elements.phoneInvite));
-elements.closePairingTicketButton.addEventListener("click", () => closeDialog(elements.pairingTicket));
-for (const backdrop of [elements.phoneInvite, elements.pairingTicket]) {
+for (const backdrop of [elements.phoneInvite]) {
   backdrop.addEventListener("click", (event) => {
     if (event.target !== backdrop) return;
     closeDialog(backdrop);
   });
 }
 document.addEventListener("keydown", (event) => {
-  const backdrop = !elements.phoneInvite.hidden ? elements.phoneInvite
-    : !elements.pairingTicket.hidden ? elements.pairingTicket : null;
+  const backdrop = !elements.phoneInvite.hidden ? elements.phoneInvite : null;
   if (!backdrop) return;
   if (event.key === "Escape") {
     closeDialog(backdrop);
@@ -1154,9 +978,6 @@ document.addEventListener("click", async (event) => {
     showToast("Không sao chép được. Hãy chọn đường dẫn hiển thị và sao chép thủ công.", true);
   }
 });
-elements.newCodeButton.addEventListener("click", createCode);
-elements.scanCodeButton.addEventListener("click", scanQrCode);
-elements.closeScannerButton.addEventListener("click", stopScanner);
 elements.chooseFilesButton.addEventListener("click", () => elements.fileInput.click());
 elements.chooseFolderButton.addEventListener("click", () => elements.folderInput.click());
 elements.fileInput.addEventListener("change", (event) => uploadFiles(event.target.files));
@@ -1186,7 +1007,7 @@ async function pollState() {
     state.connectionError = true;
     renderSendProgress();
     renderSidebar();
-    setPairMessage(error.message, true);
+    showToast(error.message, true);
     if (elements.systemStatusPill) elements.systemStatusPill.classList.add("is-offline");
     if (elements.systemStatusText) elements.systemStatusText.textContent = "Mất kết nối";
     if (elements.receiveSubtitle) {
@@ -1196,7 +1017,7 @@ async function pollState() {
     }
   }
   window.clearTimeout(refreshTimer);
-  const hasActiveTransfer = state.outgoing.some((transfer) => ["preparing", "sending"].includes(transfer.status))
+  const hasActiveTransfer = state.outgoing.some((transfer) => ["preparing", "sending", "waiting"].includes(transfer.status))
     || state.incoming.some((transfer) => ["receiving", "waiting"].includes(transfer.status))
     || state.phoneUploads.some((transfer) => transfer.status === "receiving");
   const delay = hasActiveTransfer ? 500 : document.hidden ? 5000 : 2000;
@@ -1217,7 +1038,43 @@ window.addEventListener("offline", () => {
     elements.receiveSubtitle.classList.remove("is-error");
   }
 });
-window.setInterval(renderTicket, 1000);
 askNotificationsOnce();
 showView("receive");
 pollState();
+
+function renderRequests() {
+  const offers = state.incomingRequests.filter((offer) => offer.status === "waiting");
+  setHtmlIfChanged(elements.requestList, offers.map((offer) => `
+    <article class="receive-request">
+      <h3>${escapeHtml(offer.source.name)} muốn gửi ${offer.file_count} tệp, tổng ${formatBytes(offer.total_bytes)}</h3>
+      <p class="row-meta">Chỉ nhận nếu bạn nhận ra máy gửi. Quyền nhận chỉ áp dụng cho lượt này.</p>
+      <ul class="request-files">${offer.items.slice(0, 8).map((item) => `<li>${escapeHtml(item.relative_path)} <span>${formatBytes(item.size)}</span></li>`).join("")}</ul>
+      ${offer.items.length > 8 ? `<p>Và ${offer.items.length - 8} tệp khác</p>` : ""}
+      <div class="request-actions">
+        <button class="button secondary" type="button" data-request-id="${escapeHtml(offer.id)}" data-decision="reject" ${state.decidingRequests.has(offer.id) ? "disabled" : ""}>Từ chối</button>
+        <button class="button primary" type="button" data-request-id="${escapeHtml(offer.id)}" data-decision="accept" ${state.decidingRequests.has(offer.id) ? "disabled" : ""}>Nhận</button>
+      </div>
+    </article>`).join(""));
+  if (offers.length && !elements.requestDialog.open) elements.requestDialog.showModal();
+  if (!offers.length && elements.requestDialog.open) elements.requestDialog.close();
+}
+
+elements.requestDialog.addEventListener("cancel", (event) => event.preventDefault());
+elements.requestList.addEventListener("click", async (event) => {
+  const button = event.target.closest("[data-request-id]");
+  if (!button || state.decidingRequests.has(button.dataset.requestId)) return;
+  const id = button.dataset.requestId;
+  state.decidingRequests.add(id);
+  renderRequests();
+  try {
+    await api(`/api/v1/requests/${encodeURIComponent(id)}/${button.dataset.decision}`, { method: "POST" });
+    await refresh();
+    if (button.dataset.decision === "accept") showView("receive");
+    showToast(button.dataset.decision === "accept" ? "Đã đồng ý nhận tệp." : "Đã từ chối lượt gửi.");
+  } catch (error) {
+    showToast(error.message, true);
+  } finally {
+    state.decidingRequests.delete(id);
+    renderRequests();
+  }
+});

@@ -30,8 +30,8 @@ class StagedItemMessage(BaseModel):
 
 class TransferManifestItem(BaseModel):
     id: str
-    relative_path: str
-    size: int = Field(ge=0)
+    relative_path: str = Field(min_length=1, max_length=1024)
+    size: int = Field(ge=0, le=1024**4)
     sha256: str = Field(pattern=r"^[a-fA-F0-9]{64}$")
 
 
@@ -44,7 +44,7 @@ class StartTransferRequest(BaseModel):
 class IncomingManifestRequest(BaseModel):
     batch_name: str = Field(min_length=1, max_length=120)
     source: DeviceMessage
-    items: list[TransferManifestItem] = Field(min_length=1)
+    items: list[TransferManifestItem] = Field(min_length=1, max_length=10000)
 
 
 class IncomingManifestResponse(BaseModel):

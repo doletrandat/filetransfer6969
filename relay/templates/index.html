@@ -65,7 +65,7 @@
       </nav>
       <div class="sidebar-details">
         <section aria-labelledby="connectedDevicesTitle">
-          <h2 id="connectedDevicesTitle">Đang kết nối</h2>
+          <h2 id="connectedDevicesTitle">Thiết bị trong mạng</h2>
           <div id="connectedDevicesList"></div>
         </section>
         <section aria-labelledby="sidebarProgressTitle">
@@ -150,25 +150,10 @@
               </div>
             </section>
 
-            <section class="quick-action" aria-labelledby="pairTitle">
-              <div class="action-icon" aria-hidden="true">
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                  <rect x="2" y="4" width="20" height="16" rx="2"/>
-                  <path d="M6 8h.01M10 8h.01M14 8h.01M18 8h.01M6 12h.01M10 12h.01M14 12h.01M18 12h.01M7 16h10"/>
-                </svg>
-              </div>
+            <section class="quick-action computer-receive" aria-labelledby="computerReceiveTitle">
               <div class="action-body">
-                <h2 id="pairTitle">Máy tính khác</h2>
-                <p>Chia sẻ mã 8 ký tự để nhiều máy cùng kết nối trong 10 phút.</p>
-              </div>
-              <div class="action-buttons">
-                <button class="button secondary" id="createCodeButton" type="button">
-                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                    <line x1="12" y1="5" x2="12" y2="19"/>
-                    <line x1="5" y1="12" x2="19" y2="12"/>
-                  </svg>
-                  <span>Tạo mã</span>
-                </button>
+                <h2 id="computerReceiveTitle">Nhận từ máy tính</h2>
+                <p>Máy gửi chọn máy này trong danh sách và bấm Gửi. Bạn bấm Nhận để bắt đầu, hoặc Từ chối.</p>
               </div>
             </section>
           </div>
@@ -178,7 +163,7 @@
             <div class="section-heading">
               <div>
                 <h2 id="receiptTitle">Tệp nhận gần đây</h2>
-                <p>Từ điện thoại và máy tính đã kết nối trong phiên</p>
+                <p>Các lượt nhận từ điện thoại và máy tính trong mạng</p>
               </div>
               <div class="receipt-actions">
                 <span class="count-badge" id="phoneUploadCount">0 lượt</span>
@@ -270,41 +255,6 @@
               <div class="skeleton-row" aria-hidden="true"><i></i><span></span></div>
               <div class="skeleton-row" aria-hidden="true"><i></i><span></span></div>
             </div>
-
-            <details class="pairing-options" id="pairingOptions">
-              <summary>
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                  <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
-                  <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
-                </svg>
-                <span>Ghép nối bằng mã bảo mật hoặc quét QR</span>
-              </summary>
-              <div class="pairing-content">
-                <form id="pairForm" class="code-form">
-                  <label for="pairingCode">Mã ghép nối (8 ký tự)</label>
-                  <div class="code-entry">
-                    <input id="pairingCode" name="code" autocomplete="one-time-code" maxlength="8" spellcheck="false" placeholder="ABCD2345" required>
-                    <button class="button secondary" type="submit">Kết nối</button>
-                  </div>
-                  <p class="field-message" id="pairMessage" role="status">Nhập mã hiển thị trên máy tính bạn muốn kết nối.</p>
-                </form>
-
-                <div class="scan-wrapper">
-                  <button class="button ghost" id="scanCodeButton" type="button">
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                      <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/>
-                      <circle cx="12" cy="13" r="4"/>
-                    </svg>
-                    <span>Quét mã QR qua Camera</span>
-                  </button>
-                  <div class="scan-panel" id="scanPanel" hidden>
-                    <video id="scanVideo" autoplay playsinline muted aria-label="Máy quét QR"></video>
-                    <p id="scanMessage" role="status"></p>
-                    <button class="button secondary" id="closeScannerButton" type="button">Đóng camera</button>
-                  </div>
-                </div>
-              </div>
-            </details>
 
             <div class="send-footer">
               <div class="target-stamp" id="targetStamp">
@@ -416,26 +366,11 @@
     </section>
   </div>
 
-  <!-- PAIRING CODE / QR TICKET DIALOG FOR COMPUTER -->
-  <div class="modal-backdrop" id="pairingTicket" hidden>
-    <section class="qr-dialog" role="dialog" aria-modal="true" aria-labelledby="pairDialogTitle">
-      <button class="modal-close" id="closePairingTicketButton" type="button" aria-label="Đóng hộp thoại">
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <line x1="18" y1="6" x2="6" y2="18"/>
-          <line x1="6" y1="6" x2="18" y2="18"/>
-        </svg>
-      </button>
-      <div class="dialog-badge">GHÉP NỐI MÁY TÍNH</div>
-      <h2 id="pairDialogTitle">Chia sẻ mã này</h2>
-      <p class="dialog-desc">Nhiều máy trong cùng mạng có thể nhập hoặc quét chung mã này trong 10 phút. Tạo mã mới sẽ thay mã cũ và giữ các kết nối hiện tại.</p>
-      <div class="qr-frame">
-        <img id="pairingQr" src="/static/relay-mark.svg" alt="Mã QR ghép nối" width="184" height="184">
-      </div>
-      <strong class="ticket-code" id="ticketCode"></strong>
-      <span class="ticket-countdown" id="ticketCountdown"></span>
-      <button class="button secondary" id="newCodeButton" type="button">Tạo mã mới</button>
-    </section>
-  </div>
+  <dialog id="requestDialog" class="request-dialog" aria-labelledby="requestTitle">
+    <h2 id="requestTitle">Yêu cầu gửi tệp</h2>
+    <p>Yêu cầu tự hết hạn sau 2 phút nếu chưa được trả lời.</p>
+    <div id="requestList" aria-live="polite"></div>
+  </dialog>
 
   <!-- TOAST NOTIFICATION -->
   <div class="toast" id="toast" role="alert" hidden></div>
