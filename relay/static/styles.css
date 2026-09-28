@@ -897,7 +897,7 @@ main {
 
 /* Outgoing progress stays visible in the Send view. */
 .send-progress {
-  margin-bottom: 32px;
+  margin-top: 32px;
   scroll-margin-top: 24px;
 }
 
