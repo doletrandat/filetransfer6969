@@ -1,4 +1,5 @@
 > Bản truyền file tối giản độc lập: [relay-minimal](relay-minimal/README.md).
+> Bản tự tìm máy, xác nhận và gửi nhiều file: [relay-lan](relay-lan/README.md).
 
 # Relay — truyền tệp trực tiếp trong mạng nội bộ
 
