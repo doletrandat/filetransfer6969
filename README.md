@@ -1,3 +1,5 @@
+> Bản truyền file tối giản độc lập: [relay-minimal](relay-minimal/README.md).
+
 # Relay — truyền tệp trực tiếp trong mạng nội bộ
 
 **Relay** giúp gửi tệp giữa hai máy Windows hoặc giữa máy Windows và điện thoại trong cùng mạng Wi-Fi/Ethernet. Hai máy tính chạy Relay có thể tìm nhau và xác nhận từng lượt gửi; điện thoại chỉ cần trình duyệt và mã QR. Tệp đi trực tiếp qua mạng nội bộ bằng HTTPS, không cần tài khoản hay dịch vụ đám mây.
