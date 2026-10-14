@@ -49,6 +49,7 @@ select = ["B", "E", "F", "I", "SIM", "UP"]
 
 [tool.ruff.lint.per-file-ignores]
 "relay/app.py" = ["B008"]
+"relay/routes/*.py" = ["B008"]
 
 [tool.mypy]
 python_version = "3.11"

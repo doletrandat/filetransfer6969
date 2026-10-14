@@ -1,77 +1,31 @@
+"""Khởi tạo ứng dụng, bảo vệ API và phục vụ giao diện điều khiển."""
 from __future__ import annotations
 
-import base64
-import io
 import ipaddress
 import os
 import secrets
 import socket
 from pathlib import Path
 from typing import Annotated, Any
-from urllib.parse import quote
 
-import qrcode
-from fastapi import BackgroundTasks, Depends, FastAPI, Form, Header, HTTPException, Query, Request
-from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
+from fastapi import BackgroundTasks, FastAPI, HTTPException, Query, Request
+from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
-from qrcode.image.pil import PilImage
 from starlette.middleware.base import RequestResponseEndpoint
 from starlette.requests import ClientDisconnect
 from starlette.responses import Response
 
 from relay.config import SettingsStore, get_local_addresses, load_or_create_identity
 from relay.discovery import DiscoveryManager
-from relay.models import IncomingManifestRequest
 from relay.network import PeerConnectionError
-from relay.phone import (
-    PHONE_COOKIE_NAME,
-    PHONE_SESSION_TTL_SECONDS,
-    PhoneAccess,
-    PhoneSession,
-    detect_phone_name,
-)
-from relay.transfers import ReceiveOffer, TransferCancelled, TransferError, TransferManager
+from relay.phone import PhoneAccess
+from relay.routes.phone import build_phone_router
+from relay.routes.received import build_received_router
+from relay.routes.remote import build_remote_router
+from relay.transfers import TransferError, TransferManager
 
 PACKAGE_DIR = Path(__file__).resolve().parent
-PREVIEW_MEDIA_TYPES = {
-    ".png": "image/png",
-    ".jpg": "image/jpeg",
-    ".jpeg": "image/jpeg",
-    ".gif": "image/gif",
-    ".webp": "image/webp",
-    ".bmp": "image/bmp",
-    ".pdf": "application/pdf",
-    ".mp3": "audio/mpeg",
-    ".ogg": "audio/ogg",
-    ".mp4": "video/mp4",
-    ".webm": "video/webm",
-}
-TEXT_PREVIEW_SUFFIXES = {
-    ".txt", ".log", ".md", ".csv", ".json", ".html", ".htm", ".svg",
-    ".xml", ".py", ".js", ".css", ".yaml", ".yml",
-}
-
-
-def received_file_response(
-    path: Path, filename: str | None = None, *, download: bool = False
-) -> FileResponse:
-    name = filename or path.name
-    suffix = Path(name).suffix.lower()
-    media_type = PREVIEW_MEDIA_TYPES.get(suffix)
-    content_security_policy = (
-        "default-src 'none'; img-src 'self' data: blob:; media-src 'self' blob:"
-        if media_type else "sandbox; default-src 'none'"
-    )
-    if suffix in TEXT_PREVIEW_SUFFIXES:
-        media_type = "text/plain; charset=utf-8"
-    return FileResponse(
-        path,
-        filename=name,
-        media_type=media_type or "application/octet-stream",
-        content_disposition_type="inline" if media_type and not download else "attachment",
-        headers={"Content-Security-Policy": content_security_policy},
-    )
 
 
 def open_with_default_app(path: Path) -> None:
@@ -132,29 +86,9 @@ def create_app(context: AppContext) -> FastAPI:
     templates = Jinja2Templates(directory=str(PACKAGE_DIR / "templates"))
     static_version = str(max(
         (PACKAGE_DIR / "static" / name).stat().st_mtime_ns
-        for name in ("app.js", "styles.css", "phone.js", "phone.css")
+        for name in ("app.js", "state.js", "ui.js", "render.js", "actions.js",
+                     "styles.css", "phone.js", "phone.css")
     ))
-
-    def require_offer(
-        transfer_id: str, authorization: Annotated[str | None, Header()] = None,
-    ) -> ReceiveOffer:
-        try:
-            return context.transfers.verify_offer(
-                transfer_id, (authorization or "").removeprefix("Bearer "),
-            )
-        except TransferError as error:
-            raise HTTPException(status_code=403, detail=str(error)) from error
-
-    def require_accepted(offer: ReceiveOffer = Depends(require_offer)) -> ReceiveOffer:
-        if offer.status != "accepted":
-            raise HTTPException(status_code=403, detail="Máy nhận chưa chấp nhận lượt gửi này.")
-        return offer
-
-    def require_phone(request: Request) -> PhoneSession:
-        session = context.phone.get_session(request.cookies.get(PHONE_COOKIE_NAME))
-        if session is None:
-            raise HTTPException(status_code=401, detail="Open a new phone link on the computer.")
-        return session
 
     @app.middleware("http")
     async def security_headers(request: Request, call_next: RequestResponseEndpoint) -> Response:
@@ -199,143 +133,6 @@ def create_app(context: AppContext) -> FastAPI:
             request=request, name="index.html",
             context={"control_token": context.control_token, "static_version": static_version},
         )
-
-    @app.post("/api/v1/phone/invite")
-    def create_phone_invitation() -> dict[str, Any]:
-        if context.advertised_address == "127.0.0.1":
-            raise HTTPException(status_code=503, detail="No local network address is available.")
-        token, expires_at = context.phone.create_invitation()
-        url = f"https://{context.advertised_address}:{context.port}/phone?invite={quote(token)}"
-        image = qrcode.make(url, image_factory=PilImage)
-        output = io.BytesIO()
-        image.save(output, format="PNG")
-        return {
-            "url": url,
-            "expires_at": expires_at,
-            "qr_data_url": (
-                "data:image/png;base64," + base64.b64encode(output.getvalue()).decode("ascii")
-            ),
-        }
-
-    @app.post("/api/v1/phone/revoke")
-    def revoke_phone() -> dict[str, bool]:
-        context.phone.revoke()
-        return {"disconnected": True}
-
-    @app.get("/phone", response_class=HTMLResponse)
-    def phone_page(request: Request, invite: str | None = None) -> Any:
-        if invite:
-            if not context.phone.valid_invitation(invite):
-                raise HTTPException(
-                    status_code=403, detail="This phone link has expired or was used."
-                )
-            return templates.TemplateResponse(
-                request=request,
-                name="phone-connect.html",
-                context={"invite": invite, "device_name": context.identity.name,
-                         "static_version": static_version},
-            )
-        session = require_phone(request)
-        return templates.TemplateResponse(
-            request=request,
-            name="phone.html",
-            context={"phone_token": session.csrf_token, "device_name": context.identity.name,
-                     "static_version": static_version},
-        )
-
-    @app.post("/phone/connect")
-    def connect_phone(
-        request: Request,
-        invite: Annotated[str, Form(min_length=20, max_length=100)],
-        device_model: Annotated[str, Form(max_length=80)] = "",
-    ) -> RedirectResponse:
-        device_name = detect_phone_name(
-            request.headers.get("user-agent", ""), device_model,
-            request.headers.get("sec-ch-ua-model", ""),
-        )
-        redeemed = context.phone.redeem(invite, device_name)
-        if redeemed is None:
-            raise HTTPException(status_code=403, detail="This phone link has expired or was used.")
-        cookie, _ = redeemed
-        response = RedirectResponse("/phone", status_code=303)
-        response.set_cookie(
-            PHONE_COOKIE_NAME,
-            cookie,
-            max_age=PHONE_SESSION_TTL_SECONDS,
-            path="/phone",
-            secure=True,
-            httponly=True,
-            samesite="lax",
-        )
-        return response
-
-    @app.get("/phone/api/state")
-    def phone_state(session: PhoneSession = Depends(require_phone)) -> dict[str, Any]:
-        return {
-            "available": [
-                {"id": item.id, "name": item.relative_path, "size": item.size}
-                for item in context.transfers.list_staged()
-            ],
-            "uploaded": context.phone.uploaded_files(session),
-            "expires_at": session.expires_at,
-        }
-
-    @app.delete("/phone/api/uploads/{upload_id}")
-    def cancel_phone_upload(
-        upload_id: str,
-        request: Request,
-        session: PhoneSession = Depends(require_phone),
-    ) -> dict[str, Any]:
-        if not secrets.compare_digest(
-            request.headers.get("X-Relay-Phone-Token", ""), session.csrf_token
-        ):
-            raise HTTPException(status_code=403, detail="The phone session could not be verified.")
-        try:
-            return context.phone.cancel_upload(upload_id, session).public_dict()
-        except TransferError as error:
-            raise HTTPException(status_code=409, detail=str(error)) from error
-
-    @app.post("/phone/api/files")
-    async def phone_upload(
-        request: Request,
-        filename: Annotated[str, Query(min_length=1, max_length=255)],
-        upload_id: Annotated[str | None, Query(min_length=16, max_length=64)] = None,
-        total_size: Annotated[int | None, Query(ge=0)] = None,
-        session: PhoneSession = Depends(require_phone),
-    ) -> dict[str, Any]:
-        if not secrets.compare_digest(
-            request.headers.get("X-Relay-Phone-Token", ""), session.csrf_token
-        ):
-            raise HTTPException(status_code=403, detail="The phone session could not be verified.")
-        try:
-            return await context.phone.receive_file(
-                session,
-                context.settings.load().destination,
-                filename,
-                request.stream(),
-                upload_id=upload_id,
-                total_size=total_size,
-            )
-        except ClientDisconnect:
-            raise HTTPException(status_code=499, detail="The phone disconnected.") from None
-        except TransferCancelled as error:
-            raise HTTPException(status_code=409, detail=str(error)) from error
-        except (TransferError, OSError) as error:
-            raise HTTPException(status_code=400, detail=str(error)) from error
-
-    @app.get("/phone/api/files/{item_id}", response_class=FileResponse)
-    def phone_download(
-        item_id: str, session: PhoneSession = Depends(require_phone), preview: bool = False
-    ) -> FileResponse:
-        item = next(
-            (candidate for candidate in context.transfers.list_staged() if candidate.id == item_id),
-            None,
-        )
-        if item is None or not item.path.is_file():
-            raise HTTPException(status_code=404, detail="This file is no longer available.")
-        if preview:
-            return received_file_response(item.path, Path(item.relative_path).name)
-        return FileResponse(item.path, filename=Path(item.relative_path).name)
 
     @app.get("/api/v1/status")
     def status() -> dict[str, Any]:
@@ -386,119 +183,6 @@ def create_app(context: AppContext) -> FastAPI:
             ),
             "phone_connection": context.phone.connection_state(),
         }
-
-    def phone_upload_path(upload_id: str) -> Path:
-        upload = next(
-            (item for item in context.phone.recent_uploads() if item["id"] == upload_id),
-            None,
-        )
-        if upload is None:
-            raise HTTPException(status_code=404, detail="This file is no longer available.")
-        path = Path(str(upload["path"]))
-        if path.is_symlink() or not path.is_file():
-            raise HTTPException(status_code=404, detail="This file is no longer available.")
-        return path
-
-    def computer_upload_path(transfer_id: str, item_id: str) -> Path:
-        try:
-            transfer = context.transfers.incoming_status(transfer_id)
-        except TransferError as error:
-            raise HTTPException(
-                status_code=404, detail="This file is no longer available."
-            ) from error
-        item = next((candidate for candidate in transfer.items if candidate.id == item_id), None)
-        if item is None or not item.completed:
-            raise HTTPException(status_code=404, detail="This file is no longer available.")
-        path = item.target
-        if (
-            path.is_symlink()
-            or not path.is_file()
-            or not path.resolve().is_relative_to(transfer.destination.resolve())
-        ):
-            raise HTTPException(status_code=404, detail="This file is no longer available.")
-        return path
-
-    def open_received_file(path: Path) -> dict[str, bool]:
-        try:
-            open_with_default_app(path)
-        except OSError as error:
-            raise HTTPException(
-                status_code=500,
-                detail=(
-                    "Windows không mở được tệp. "
-                    "Hãy kiểm tra ứng dụng mặc định cho loại tệp này."
-                ),
-            ) from error
-        return {"opened": True}
-
-    @app.post("/api/v1/received/phone/{upload_id}/open")
-    def open_phone_upload_in_windows(upload_id: str) -> dict[str, bool]:
-        return open_received_file(phone_upload_path(upload_id))
-
-    @app.post("/api/v1/received/computer/{transfer_id}/{item_id}/open")
-    def open_computer_upload_in_windows(transfer_id: str, item_id: str) -> dict[str, bool]:
-        return open_received_file(computer_upload_path(transfer_id, item_id))
-
-    def preview_response(request: Request, path: Path, file_url: str) -> HTMLResponse:
-        suffix = path.suffix.lower()
-        kind = (
-            "image" if suffix in {".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp"}
-            else "video" if suffix in {".mp4", ".webm"}
-            else "audio" if suffix in {".mp3", ".ogg"}
-            else "text" if suffix in TEXT_PREVIEW_SUFFIXES
-            else "pdf" if suffix == ".pdf"
-            else "other"
-        )
-        preview_text = ""
-        truncated = False
-        if kind == "text":
-            try:
-                with path.open("rb") as source:
-                    content = source.read(256 * 1024 + 1)
-            except OSError as error:
-                raise HTTPException(
-                    status_code=404, detail="This file is no longer available."
-                ) from error
-            truncated = len(content) > 256 * 1024
-            preview_text = content[:256 * 1024].decode("utf-8", errors="replace")
-        return templates.TemplateResponse(
-            request=request,
-            name="preview.html",
-            context={
-                "filename": path.name, "kind": kind, "file_url": file_url,
-                "preview_text": preview_text, "truncated": truncated,
-            },
-        )
-
-    @app.get("/api/v1/received/phone/{upload_id}/preview", response_class=HTMLResponse)
-    def preview_phone_upload(request: Request, upload_id: str) -> HTMLResponse:
-        path = phone_upload_path(upload_id)
-        return preview_response(request, path, f"/api/v1/received/phone/{quote(upload_id)}")
-
-    @app.get("/api/v1/received/phone/{upload_id}", response_class=FileResponse)
-    def open_phone_upload(upload_id: str, download: bool = False) -> FileResponse:
-        return received_file_response(phone_upload_path(upload_id), download=download)
-
-    @app.get(
-        "/api/v1/received/computer/{transfer_id}/{item_id}/preview",
-        response_class=HTMLResponse,
-    )
-    def preview_computer_upload(request: Request, transfer_id: str, item_id: str) -> HTMLResponse:
-        path = computer_upload_path(transfer_id, item_id)
-        file_url = (
-            f"/api/v1/received/computer/{quote(transfer_id)}/{quote(item_id)}"
-        )
-        return preview_response(request, path, file_url)
-
-    @app.get(
-        "/api/v1/received/computer/{transfer_id}/{item_id}", response_class=FileResponse
-    )
-    def open_computer_upload(
-        transfer_id: str, item_id: str, download: bool = False
-    ) -> FileResponse:
-        return received_file_response(
-            computer_upload_path(transfer_id, item_id), download=download
-        )
 
     @app.get("/api/v1/staged")
     def staged() -> list[dict[str, Any]]:
@@ -603,97 +287,11 @@ def create_app(context: AppContext) -> FastAPI:
     def incoming_transfers() -> list[dict[str, Any]]:
         return [transfer.public_dict() for transfer in context.transfers.list_incoming()]
 
-    @app.get("/api/v1/remote/identity")
-    def remote_identity() -> dict[str, str]:
-        return {
-            "id": context.identity.id,
-            "name": context.identity.name,
-            "fingerprint": context.identity.fingerprint,
-        }
-
-    @app.post("/api/v1/remote/transfers")
-    def remote_start_transfer(payload: IncomingManifestRequest) -> dict[str, Any]:
-        try:
-            offer = context.transfers.request_incoming(payload)
-            return {**offer.public_dict(), "token": offer.token}
-        except TransferError as error:
-            raise HTTPException(status_code=400, detail=str(error)) from error
-
-    @app.post("/api/v1/requests/{transfer_id}/accept")
-    def accept_request(transfer_id: str) -> dict[str, Any]:
-        try:
-            return context.transfers.decide_offer(transfer_id, True).public_dict()
-        except (TransferError, OSError) as error:
-            raise HTTPException(status_code=409, detail=str(error)) from error
-
-    @app.post("/api/v1/requests/{transfer_id}/reject")
-    def reject_request(transfer_id: str) -> dict[str, Any]:
-        try:
-            return context.transfers.decide_offer(transfer_id, False).public_dict()
-        except TransferError as error:
-            raise HTTPException(status_code=409, detail=str(error)) from error
-
-    @app.post("/api/v1/remote/transfers/{transfer_id}/files/{item_id}")
-    async def remote_receive_file(
-        transfer_id: str,
-        item_id: str,
-        request: Request,
-        offer: ReceiveOffer = Depends(require_accepted),
-    ) -> dict[str, str]:
-        try:
-            await context.transfers.receive_file(transfer_id, item_id, request.stream())
-        except TransferCancelled as error:
-            raise HTTPException(status_code=409, detail=str(error)) from error
-        except TransferError as error:
-            raise HTTPException(status_code=400, detail=str(error)) from error
-        return {"received": "true"}
-
-    @app.post(
-        "/api/v1/remote/transfers/{transfer_id}/files/{item_id}/chunks",
-        response_model=None,
-    )
-    async def remote_receive_chunk(
-        transfer_id: str,
-        item_id: str,
-        request: Request,
-        offset: Annotated[int, Query(ge=0)],
-        total_size: Annotated[int, Query(ge=0)],
-        final: bool,
-        offer: ReceiveOffer = Depends(require_accepted),
-    ) -> dict[str, Any] | Response:
-        try:
-            return await context.transfers.receive_chunk(
-                transfer_id=transfer_id,
-                item_id=item_id,
-                offset=offset,
-                total_size=total_size,
-                final=final,
-                stream=request.stream(),
-            )
-        except ClientDisconnect:
-            return Response(status_code=499)
-        except TransferCancelled as error:
-            raise HTTPException(status_code=409, detail=str(error)) from error
-        except (TransferError, OSError) as error:
-            raise HTTPException(status_code=400, detail=str(error)) from error
-
-    @app.delete("/api/v1/remote/transfers/{transfer_id}")
-    def remote_cancel_transfer(
-        transfer_id: str, offer: ReceiveOffer = Depends(require_offer),
-    ) -> dict[str, Any]:
-        try:
-            return context.transfers.cancel_offer(transfer_id)
-        except TransferError as error:
-            raise HTTPException(status_code=409, detail=str(error)) from error
-
-    @app.get("/api/v1/remote/transfers/{transfer_id}")
-    def remote_transfer_status(
-        transfer_id: str, offer: ReceiveOffer = Depends(require_offer),
-    ) -> dict[str, Any]:
-        if offer.status == "accepted":
-            return context.transfers.incoming_status(transfer_id).public_dict()
-        return offer.public_dict()
-
+    app.include_router(build_phone_router(context, templates, static_version))
+    app.include_router(build_received_router(
+        context, templates, lambda path: open_with_default_app(path),
+    ))
+    app.include_router(build_remote_router(context))
     app.mount("/static", StaticFiles(directory=str(PACKAGE_DIR / "static")), name="static")
     return app
 

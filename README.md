@@ -98,7 +98,20 @@ flowchart LR
 - **Khôi phục:** Relay lưu trạng thái hàng chờ và phần tệp đã nhận. Sau khi khởi động lại, chọn thử gửi lại để tạo yêu cầu mới và được máy nhận đồng ý lần nữa. Tệp đã hoàn tất được kiểm tra để tránh truyền lại; lượt mới truyền lại các tệp chưa hoàn tất.
 - **Quyền truy cập:** giao diện điều khiển chỉ mở trên `localhost`; trang điện thoại yêu cầu liên kết mời và phiên kết nối còn hiệu lực.
 
-Mã nguồn chính nằm trong [`relay/app.py`](relay/app.py) (API và giao diện), [`relay/transfers.py`](relay/transfers.py) (hàng chờ và truyền tệp), [`relay/discovery.py`](relay/discovery.py) (tìm thiết bị) và [`relay/phone.py`](relay/phone.py) (kết nối điện thoại). Các phụ thuộc được khai báo trong [`pyproject.toml`](pyproject.toml).
+## Cấu trúc code và bảo vệ bài tập lớn
+
+Xem [hướng dẫn bảo vệ cho nhóm 3 người](docs/BAO_VE.md): phân công chuẩn bị, cách ôn chéo để cả 3 hiểu toàn bộ code, sơ đồ luồng và câu hỏi vấn đáp.
+
+| Nhóm chức năng | Mã nguồn |
+| --- | --- |
+| Khởi động, cấu hình và tìm thiết bị | `relay/__main__.py`, `app.py`, `config.py`, `discovery.py`, `network.py` |
+| Chuẩn bị và gửi tệp | `relay/staging.py`, `transfers.py` |
+| Xác nhận và nhận tệp | `relay/receiving.py`, `routes/remote.py` |
+| Dữ liệu, đường dẫn và khôi phục | `relay/transfer_types.py`, `transfer_paths.py`, `transfer_store.py`, `models.py` |
+| Điện thoại và mở tệp đã nhận | `relay/phone.py`, `routes/phone.py`, `routes/received.py`, `file_preview.py` |
+| Giao diện máy tính | `relay/static/state.js`, `ui.js`, `render.js`, `actions.js`, `app.js` |
+
+`TransferManager` là điểm gọi chung của API và chuyển việc chuẩn bị, nhận, lưu trạng thái cho các dịch vụ tương ứng. JavaScript dùng ES modules: trạng thái dùng chung, hàm hiển thị, thao tác API và sự kiện giao diện nằm ở các file riêng. Chạy và sử dụng như trước, không cần bước build frontend. Các phụ thuộc được khai báo trong [`pyproject.toml`](pyproject.toml).
 
 ## Kiểm thử
 
