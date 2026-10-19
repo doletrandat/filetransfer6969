@@ -4,6 +4,26 @@ Bản dòng lệnh độc lập, chỉ dùng thư viện chuẩn **Python 3.11+*
 Sao chép toàn bộ thư mục `relay-lan` sang hai máy, mở PowerShell trong thư mục này.
 Không cần cài thư viện để chạy chương trình.
 
+## Cấu trúc module
+
+`relay.py` là điểm chạy ngắn gọn; mã chức năng nằm trong package `relay_lan`:
+
+| File | Trách nhiệm |
+| --- | --- |
+| `relay_lan/config.py` | Cổng, timeout, kích thước khối và mã giao thức dùng chung |
+| `relay_lan/protocol.py` | Đọc đủ byte, đóng khung JSON, kiểm tra tên và danh sách file |
+| `relay_lan/discovery.py` | Tìm máy và trả lời tìm kiếm bằng UDP |
+| `relay_lan/console.py` | Hiển thị tiến độ và đọc xác nhận có thời hạn |
+| `relay_lan/transfer.py` | Gửi/nhận nhiều file, tránh ghi đè và xóa file nhận dở |
+| `relay_lan/server.py` | Chạy máy nhận TCP và quản lý luồng trả lời UDP |
+| `relay_lan/cli.py` | Phân tích tham số và điều phối các lệnh |
+| `relay_lan/__main__.py` | Điểm chạy `python -m relay_lan` |
+
+Giữ nguyên cách chạy `python relay.py ...` bên dưới. Có thể thay bằng
+`python -m relay_lan ...` khi đang ở thư mục `relay-lan`.
+Khi chuyển sang máy khác, sao chép cả `relay.py` và thư mục `relay_lan`,
+hoặc toàn bộ thư mục `relay-lan` như hướng dẫn ở trên.
+
 ## 1. Máy nhận
 
 ```powershell
@@ -70,7 +90,7 @@ python relay.py send "C:\TaiLieu\bao-cao.pdf" --host 192.168.1.10
 python -m pip install -r requirements-dev.txt
 python -m pytest -q
 python -m ruff check .
-python -m mypy relay.py tests
+python -m mypy relay.py relay_lan tests
 ```
 
 Kiểm thử sử dụng UDP/TCP thực qua loopback, kiểm tra nội dung file ở hai đầu và

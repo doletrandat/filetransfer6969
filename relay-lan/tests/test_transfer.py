@@ -15,7 +15,9 @@ from pathlib import Path
 
 import pytest
 
-from relay import PROTOCOL, discover, read_message, send_message
+from relay_lan.config import PROTOCOL
+from relay_lan.discovery import discover
+from relay_lan.protocol import read_message, send_message
 
 ROOT = Path(__file__).resolve().parents[1]
 ENV = {**os.environ, "PYTHONIOENCODING": "utf-8"}
@@ -50,9 +52,9 @@ class Receiver:
 @pytest.fixture
 def receiver(tmp_path: Path) -> Iterator[Receiver]:
     script = (
-        "import relay, sys; from pathlib import Path; "
-        "relay.TIMEOUT = 2; relay.CONSENT_TIMEOUT = 2; "
-        "relay.receive('127.0.0.1', 0, 0, Path(sys.argv[1]), 'Máy thử')"
+        "import sys; from pathlib import Path; from relay_lan import config, server; "
+        "config.TIMEOUT = 2; config.CONSENT_TIMEOUT = 2; "
+        "server.receive('127.0.0.1', 0, 0, Path(sys.argv[1]), 'Máy thử')"
     )
     process = subprocess.Popen(
         [sys.executable, "-S", "-u", "-c", script, str(tmp_path / "received")],
@@ -90,15 +92,16 @@ def offer(conn: socket.socket, entries: list[tuple[str, int]]) -> None:
 
 
 def run_sender(receiver: Receiver, paths: list[Path], answer: str = "y",
-               automatic: bool = False) -> tuple[int, str]:
-    command = [sys.executable, "-S", "relay.py"]
+               automatic: bool = False, module: bool = False) -> tuple[int, str]:
+    entrypoint = ["-m", "relay_lan"] if module else ["relay.py"]
+    command = [sys.executable, "-S", *entrypoint]
     destination = ["--host", "127.0.0.1", "--port", str(receiver.tcp)]
     if automatic:
         # Giữ toàn bộ bước tìm/chọn thật, chỉ đổi broadcast thành UDP loopback cho CI.
         script = (
-            "import relay; original = relay.discover; "
-            "relay.discover = lambda port: original(port, seconds=.2, target='127.0.0.1'); "
-            "relay.main()"
+            "from relay_lan import cli; original = cli.discover; "
+            "cli.discover = lambda port: original(port, seconds=.2, target='127.0.0.1'); "
+            "cli.main()"
         )
         command = [sys.executable, "-S", "-c", script]
         destination = ["--discovery-port", str(receiver.udp)]
@@ -121,14 +124,17 @@ def run_sender(receiver: Receiver, paths: list[Path], answer: str = "y",
                 sender.wait(timeout=5)
 
 
-def test_multiple_files_unicode_empty_and_multichunk(receiver: Receiver, tmp_path: Path) -> None:
+@pytest.mark.parametrize("module", [False, True])
+def test_multiple_files_unicode_empty_and_multichunk(
+    receiver: Receiver, tmp_path: Path, module: bool,
+) -> None:
     paths = []
     for name, content in [("rỗng.txt", b""), ("ảnh.bin", os.urandom(3 * 1024 * 1024 + 19)),
                           ("ghi chú.txt", "Xin chào".encode())]:
         path = tmp_path / name
         path.write_bytes(content)
         paths.append(path)
-    status, output = run_sender(receiver, paths)
+    status, output = run_sender(receiver, paths, module=module)
     assert status == 0, output
     assert "Hoàn tất gửi 3 file" in output
     assert "[3/3]" in output and "100.00%" in output
@@ -281,9 +287,10 @@ def test_sender_rejects_nonfiles(tmp_path: Path, kind: str) -> None:
 
 @pytest.mark.parametrize("arguments, status", [(["--help"], 0),
                                               (["receive", "--port", "0"], 2)])
-def test_cli_windows_encoding(arguments: list[str], status: int) -> None:
+@pytest.mark.parametrize("entrypoint", [["relay.py"], ["-m", "relay_lan"]])
+def test_cli_windows_encoding(arguments: list[str], status: int, entrypoint: list[str]) -> None:
     result = subprocess.run(
-        [sys.executable, "-S", "relay.py", *arguments], cwd=ROOT,
+        [sys.executable, "-S", *entrypoint, *arguments], cwd=ROOT,
         capture_output=True, text=True, encoding="utf-8", timeout=5,
         env={**os.environ, "PYTHONIOENCODING": "cp1252"},
     )
