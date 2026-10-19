@@ -14,7 +14,9 @@ class Progress:
 
     def update(self, count: int) -> None:
         self.done += count
+        # Đồng hồ monotonic không bị ảnh hưởng khi người dùng chỉnh giờ hệ thống.
         now = time.monotonic()
+        # Hạn chế in liên tục; luôn in lần cuối và coi file rỗng là hoàn tất 100%.
         if self.done == self.size or now - self.last >= 0.2:
             percent = self.done * 100 / self.size if self.size else 100
             print(f"\r{self.label}: {percent:6.2f}% ({self.done}/{self.size} byte)",
@@ -28,12 +30,14 @@ class Confirmation:
     def __init__(self) -> None:
         self.answers: queue.Queue[str | None] = queue.Queue()
         self.closed = threading.Event()
+        # Đọc stdin ở luồng nền để luồng nhận file có thể hết giờ chờ xác nhận.
         threading.Thread(target=self.read_input, daemon=True).start()
 
     def read_input(self) -> None:
         for line in sys.stdin:
             self.answers.put(line)
         self.closed.set()
+        # None đánh thức bên đang chờ Queue.get khi stdin đã đóng.
         self.answers.put(None)
 
     def __call__(self, prompt: str) -> str:
@@ -44,6 +48,7 @@ class Confirmation:
             raise EOFError("Đầu vào đã đóng; không thể xác nhận nhận file.")
         print(prompt, flush=True)
         try:
+            # Timeout chỉ kết thúc lượt chờ này; luồng đọc bàn phím vẫn dùng lại.
             answer = self.answers.get(timeout=config.CONSENT_TIMEOUT)
         except queue.Empty as error:
             raise TimeoutError("Hết thời gian chờ xác nhận.") from error

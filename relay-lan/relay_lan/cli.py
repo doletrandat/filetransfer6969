@@ -27,6 +27,7 @@ def port_number(value: str) -> int:
 
 
 def main() -> None:
+    # Buộc UTF-8 để thông báo tiếng Việt không lỗi trên console Windows dùng mã khác.
     for stream in (sys.stdout, sys.stderr):
         if isinstance(stream, TextIOWrapper):
             stream.reconfigure(encoding="utf-8")
@@ -40,6 +41,7 @@ def main() -> None:
     sender.add_argument("files", nargs="+", type=Path)
     sender.add_argument("--host", help="Nhập IP thủ công, bỏ qua bước tìm máy")
     scanner = commands.add_parser("discover", help="Liệt kê máy nhận trong LAN")
+    # Mọi lệnh dùng cổng tìm kiếm; chỉ gửi/nhận cần thêm cổng truyền TCP.
     for command in (receiver, sender, scanner):
         command.add_argument("--discovery-port", type=port_number, default=UDP_PORT)
     for command in (receiver, sender):
@@ -52,6 +54,7 @@ def main() -> None:
             show_peers(discover(args.discovery_port))
         else:
             host, port = args.host, args.port
+            # Có --host thì gửi thẳng; nếu thiếu thì tìm máy và cho người dùng chọn.
             if not host:
                 peers = discover(args.discovery_port)
                 show_peers(peers)
@@ -60,6 +63,7 @@ def main() -> None:
                 choice = int(input("Chọn số máy nhận: "))
                 if not 1 <= choice <= len(peers):
                     raise ValueError("Số máy được chọn không hợp lệ.")
+                # Dùng cổng TCP máy nhận quảng bá, có thể khác cổng mặc định.
                 _, host, port = peers[choice - 1]
             send_files(host, port, args.files)
     except KeyboardInterrupt:

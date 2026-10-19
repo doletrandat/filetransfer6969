@@ -18,6 +18,7 @@ def create_output(directory: Path, name: str) -> tuple[Path, BinaryIO]:
         filename = name if number == 0 else f"{original.stem} ({number}){original.suffix}"
         target = directory / filename
         try:
+            # Mở xb trực tiếp để tránh khoảng đua giữa kiểm tra tồn tại và tạo file.
             return target, target.open("xb")  # Tạo độc quyền, không ghi đè.
         except FileExistsError:
             continue
@@ -33,6 +34,7 @@ def receive_batch(conn: socket.socket, directory: Path, host: str,
           f"tổng {sum(size for _, size in files)} byte:", flush=True)
     for name, size in files:
         print(f"  {name!r}: {size} byte", flush=True)
+    # Chỉ y mới chấp nhận; chưa tạo file hoặc đọc nội dung file trước quyết định này.
     if ask("Đồng ý nhận? [y/N]: ").strip().lower() != "y":
         send_message(conn, {"accepted": False})
         print("Đã từ chối.", flush=True)
@@ -46,6 +48,7 @@ def receive_batch(conn: socket.socket, directory: Path, host: str,
                 remaining = size
                 progress.update(0)
                 while remaining:
+                    # Không đọc quá số byte đã khai báo để giữ đúng ranh giới các file.
                     chunk = read_exact(conn, min(CHUNK, remaining))
                     output.write(chunk)
                     remaining -= len(chunk)
@@ -53,11 +56,13 @@ def receive_batch(conn: socket.socket, directory: Path, host: str,
         except (OSError, ValueError, KeyboardInterrupt):
             target.unlink(missing_ok=True)  # Chỉ xóa file của lượt đang nhận dở.
             raise
+        # Xác nhận sau khi file đã ghi và đóng thành công; trả tên thực tế nếu bị trùng.
         send_message(conn, {"saved": target.name})
         print(f"Đã lưu: {target}", flush=True)
 
 
 def send_files(host: str, port: int, paths: list[Path]) -> None:
+    # Lập danh sách tên/kích thước trước khi kết nối để báo lỗi nguồn ngay tại máy gửi.
     files: list[dict[str, object]] = []
     for path in paths:
         if not path.is_file():
@@ -72,10 +77,12 @@ def send_files(host: str, port: int, paths: list[Path]) -> None:
         print("Đang chờ máy nhận đồng ý...", flush=True)
         if read_message(conn).get("accepted") is not True:
             raise OSError("Máy nhận đã từ chối.")
+        # Sau khi được đồng ý, chuyển từ thời hạn xác nhận sang timeout truyền dữ liệu.
         conn.settimeout(config.TIMEOUT)
         for index, (path, (name, size)) in enumerate(zip(paths, manifest, strict=True), 1):
             progress = Progress(f"Gửi [{index}/{len(paths)}] {name!r}", size)
             with path.open("rb") as source:
+                # File có thể đổi trong lúc chờ đồng ý; đối chiếu lại kích thước đã báo.
                 if os.fstat(source.fileno()).st_size != size:
                     raise OSError(f"Kích thước file đã thay đổi: {path}")
                 remaining = size
@@ -87,6 +94,7 @@ def send_files(host: str, port: int, paths: list[Path]) -> None:
                     conn.sendall(chunk)
                     remaining -= len(chunk)
                     progress.update(len(chunk))
+            # Chờ xác nhận lưu từng file rồi mới gửi tiếp hoặc báo hoàn tất cả lượt.
             saved = read_message(conn).get("saved")
             if not isinstance(saved, str):
                 raise OSError("Máy nhận chưa xác nhận lưu file.")
