@@ -1,3 +1,4 @@
+# Kiểm thử registry ghép nối và phiên được định nghĩa trong security.py.
 from __future__ import annotations
 
 import pytest

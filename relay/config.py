@@ -1,3 +1,4 @@
+# Cấu hình thư mục nhận, định danh thiết bị và chứng chỉ HTTPS tự ký.
 from __future__ import annotations
 
 import hashlib
@@ -20,6 +21,7 @@ class Settings:
     destination: Path
 
 
+# Lưu cấu hình thư mục nhận vào JSON, mặc định là Downloads/Relay.
 class SettingsStore:
     def __init__(self, data_dir: Path) -> None:
         self._path = data_dir / "settings.json"
@@ -52,6 +54,7 @@ class DeviceIdentity:
     fingerprint: str
 
 
+# Tập hợp địa chỉ IPv4 có thể dùng để quảng bá hoặc ghi vào chứng chỉ.
 def get_local_addresses() -> list[str]:
     addresses: set[str] = {"127.0.0.1"}
     route_address = ""
@@ -80,6 +83,7 @@ def create_device_id() -> str:
     return hashlib.sha256(f"{socket.gethostname()}:{uuid.uuid4()}".encode()).hexdigest()[:16]
 
 
+# Giữ ID/khóa thiết bị và cấp lại chứng chỉ khi SAN hoặc thời hạn không còn phù hợp.
 def load_or_create_identity(
     data_dir: Path,
     name: str,
@@ -170,6 +174,7 @@ def load_or_create_identity(
     return DeviceIdentity(id=device_id, name=name, fingerprint=certificate_fingerprint(cert_path))
 
 
+# Fingerprint là SHA-256 của chứng chỉ, được biểu diễn dưới dạng hex có dấu hai chấm.
 def certificate_fingerprint(path: Path) -> str:
     certificate = x509.load_pem_x509_certificate(path.read_bytes())
     digest = certificate.fingerprint(hashes.SHA256())

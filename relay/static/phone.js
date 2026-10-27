@@ -1,3 +1,4 @@
+// Giao diện điện thoại: theo dõi phiên, tải file lên và lấy file đã chuẩn bị.
 const phoneToken = document.querySelector('meta[name="relay-phone-token"]').content;
 const elements = {
   viewButtons: document.querySelectorAll("[data-phone-view]"),
@@ -104,6 +105,7 @@ async function refresh() {
   }
 }
 
+// Một request cho mỗi file; XMLHttpRequest cung cấp sự kiện cập nhật tiến trình.
 function uploadFile(file, uploadId) {
   return new Promise((resolve, reject) => {
     const request = new XMLHttpRequest();

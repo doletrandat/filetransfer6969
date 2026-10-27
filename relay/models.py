@@ -1,8 +1,10 @@
+# Các mô hình Pydantic kiểm tra dữ liệu thiết bị, manifest và yêu cầu truyền.
 from __future__ import annotations
 
 from pydantic import BaseModel, Field
 
 
+# Mô tả thiết bị xuất hiện trong thông tin trao đổi giữa hai máy.
 class DeviceMessage(BaseModel):
     id: str
     name: str = Field(min_length=1, max_length=80)
@@ -28,6 +30,7 @@ class StagedItemMessage(BaseModel):
     staged_at: float
 
 
+# Mỗi mục manifest mô tả file bằng ID, đường dẫn, kích thước và SHA-256.
 class TransferManifestItem(BaseModel):
     id: str
     relative_path: str = Field(min_length=1, max_length=1024)
@@ -41,6 +44,7 @@ class StartTransferRequest(BaseModel):
     item_ids: list[str] = Field(min_length=1)
 
 
+# Giới hạn số file và cấu trúc manifest trước khi tạo yêu cầu nhận.
 class IncomingManifestRequest(BaseModel):
     batch_name: str = Field(min_length=1, max_length=120)
     source: DeviceMessage

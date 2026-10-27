@@ -1,3 +1,4 @@
+# Quảng bá và theo dõi các dịch vụ Relay trong LAN bằng Zeroconf/mDNS.
 from __future__ import annotations
 
 import socket
@@ -45,6 +46,7 @@ class DiscoveryListener(ServiceListener):
         self._manager.remove_service(name)
 
 
+# Đăng ký dịch vụ mDNS, theo dõi máy khác và loại thiết bị quá hạn.
 class DiscoveryManager:
     def __init__(
         self,
@@ -141,6 +143,7 @@ class DiscoveryManager:
         self._refresh_known_services()
         return [device for device in self.list_devices() if device.code_hash == code_hash]
 
+    # Đọc lại địa chỉ, cổng và metadata khi dịch vụ được phát hiện hoặc cập nhật.
     def refresh_service(self, name: str) -> None:
         with self._lifecycle_lock:
             if self._zeroconf is None or self._stop_event.is_set():
@@ -203,6 +206,7 @@ class DiscoveryManager:
             zeroconf.register_service(service, allow_name_change=True)
             self._published_service = service
 
+    # Quảng bá ID, tên, cổng và fingerprint; thông tin mDNS không tự xác thực danh tính.
     def _service_info(self, address: str) -> ServiceInfo:
         properties = {
             "id": self._device_id,

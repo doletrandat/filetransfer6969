@@ -1,3 +1,4 @@
+# Nghiệp vụ chuẩn bị, xác nhận, truyền, kiểm tra và khôi phục các lượt truyền tệp.
 from __future__ import annotations
 
 import hashlib
@@ -27,6 +28,7 @@ from relay.models import (
 )
 from relay.network import PeerConnectionError, open_peer_client
 
+# Chunk giữa hai máy là 1 MiB; giới hạn kích thước là kiểm tra đầu vào, không phải benchmark.
 CHUNK_SIZE = 1024 * 1024
 MAX_FILE_SIZE = 1024 * 1024 * 1024 * 1024
 INVALID_WINDOWS_CHARACTERS = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
@@ -55,6 +57,7 @@ class Digest(Protocol):
     def copy(self) -> Digest: ...
 
 
+# Làm sạch tên Windows và từ chối đường dẫn tuyệt đối hoặc đi lên thư mục cha.
 def sanitize_relative_path(value: str) -> Path:
     normalized = value.replace("\\", "/")
     path = PurePosixPath(normalized)
@@ -75,6 +78,7 @@ def sanitize_relative_path(value: str) -> Path:
     return Path(*safe_parts)
 
 
+# Kiểm tra đường dẫn đã resolve vẫn nằm trong thư mục gốc được phép.
 def safe_join(root: Path, relative_path: str) -> Path:
     relative = sanitize_relative_path(relative_path)
     candidate = (root / relative).resolve()
@@ -94,6 +98,7 @@ def device_folder_name(name: str) -> str:
 
 
 @dataclass(frozen=True, slots=True)
+# Metadata của bản sao tệp đã chuẩn bị trong staging trên máy gửi.
 class StagedItem:
     id: str
     relative_path: str
@@ -113,6 +118,7 @@ class StagedItem:
 
 
 @dataclass(slots=True)
+# Theo dõi dữ liệu trình duyệt đang đưa vào staging trước khi tạo StagedItem.
 class ChunkedUpload:
     upload_id: str
     relative_path: str
@@ -125,6 +131,7 @@ class ChunkedUpload:
 
 
 @dataclass(frozen=True, slots=True)
+# Thông tin máy nhận và token cần thiết cho một lượt gửi.
 class PeerSession:
     id: str
     name: str
@@ -144,6 +151,7 @@ class PeerSession:
 
 
 @dataclass(slots=True)
+# Trạng thái phía gửi, gồm byte, tốc độ và danh sách tệp đã hoàn thành.
 class OutgoingTransfer:
     id: str
     batch_name: str
@@ -186,6 +194,7 @@ class OutgoingTransfer:
 
 
 @dataclass(slots=True)
+# Tệp phía nhận cùng vị trí đích, byte đã nhận và trạng thái hash.
 class IncomingItem:
     id: str
     relative_path: str
@@ -198,6 +207,7 @@ class IncomingItem:
 
 
 @dataclass(slots=True)
+# Tập các tệp và trạng thái của một lượt nhận từ thiết bị khác.
 class IncomingTransfer:
     id: str
     batch_name: str
@@ -255,6 +265,7 @@ class IncomingTransfer:
 
 
 @dataclass(slots=True)
+# Manifest đang chờ quyết định và token dành riêng cho lượt gửi.
 class ReceiveOffer:
     id: str
     manifest: IncomingManifestRequest
@@ -274,6 +285,7 @@ class ReceiveOffer:
         }
 
 
+# Điều phối staging, xác nhận, truyền chunk và lưu trạng thái trên từng máy.
 class TransferManager:
     def __init__(
         self,
@@ -300,6 +312,7 @@ class TransferManager:
         for orphan in self._staging_dir.glob(".*.part"):
             orphan.unlink(missing_ok=True)
 
+    # Nhận toàn bộ stream vào staging và tính SHA-256 trong lúc ghi.
     async def stage(self, relative_path: str, stream: AsyncIterable[bytes]) -> StagedItem:
         safe_path = sanitize_relative_path(relative_path)
         item_id = uuid.uuid4().hex
@@ -332,6 +345,7 @@ class TransferManager:
             self._save_state()
         return item
 
+    # Nhận từng chunk cục bộ; rollback phần ghi dở khi request bị ngắt.
     async def stage_chunk(
         self,
         upload_id: str,
@@ -451,6 +465,7 @@ class TransferManager:
             item.path.unlink(missing_ok=True)
         return len(items)
 
+    # Tạo manifest, kiểm tra máy nhận và gửi yêu cầu trước khi truyền nội dung.
     def start_outgoing(
         self,
         peer_id: str,
@@ -528,6 +543,7 @@ class TransferManager:
             self._save_state()
         return transfer
 
+    # Chờ người nhận đồng ý, gửi chunk và cập nhật tiến trình của từng lượt.
     def run_outgoing(self, transfer_id: str) -> None:
         with self._lock:
             transfer = self._outgoing.get(transfer_id)
@@ -604,6 +620,7 @@ class TransferManager:
                             is_final = item_offset + len(chunk) >= item.size
                             last_error: Exception | None = None
                             response = None
+                            # Thử tối đa ba lần; hai khoảng chờ sau lỗi lần lượt là một và hai giây.
                             for attempt in range(3):
                                 try:
                                     self._require_outgoing_active(transfer)
@@ -690,6 +707,7 @@ class TransferManager:
             with self._lock:
                 self._save_state()
 
+    # Thử lại bằng lượt mới, vì vậy máy nhận phải xác nhận lại.
     def retry_outgoing(self, transfer_id: str) -> OutgoingTransfer:
         with self._lock:
             transfer = self._outgoing.get(transfer_id)
@@ -705,6 +723,7 @@ class TransferManager:
         with self._lock:
             return sorted(self._outgoing.values(), key=lambda item: item.created_at, reverse=True)
 
+    # Hủy cục bộ và cố gắng báo hủy cho máy nhận qua API từ xa.
     def cancel_outgoing(self, transfer_id: str) -> OutgoingTransfer:
         with self._lock:
             transfer = self._outgoing.get(transfer_id)
@@ -743,6 +762,7 @@ class TransferManager:
         if transfer.status == "cancelled":
             raise TransferCancelled(transfer.error or "This transfer was cancelled.")
 
+    # Tạo offer 120 giây; chưa tạo thư mục nhận hoặc nhận nội dung file.
     def request_incoming(self, request: IncomingManifestRequest) -> ReceiveOffer:
         self._validate_manifest(request)
         with self._lock:
@@ -770,6 +790,7 @@ class TransferManager:
                     offer.status = "expired"
             return list(self._offers.values())
 
+    # So sánh token theo lượt trước khi cho phép truy cập trạng thái hoặc dữ liệu.
     def verify_offer(self, transfer_id: str, token: str) -> ReceiveOffer:
         with self._lock:
             self.list_offers()
@@ -778,6 +799,7 @@ class TransferManager:
                 raise TransferError("Quyền truy cập lượt gửi không hợp lệ.")
             return offer
 
+    # Chỉ tạo trạng thái nhận khi người dùng trên máy nhận chấp nhận offer.
     def decide_offer(self, transfer_id: str, accept: bool) -> ReceiveOffer:
         with self._lock:
             self.list_offers()
@@ -801,6 +823,7 @@ class TransferManager:
             return offer.public_dict()
 
     @staticmethod
+    # Không cho ID hoặc đường dẫn sau khi làm sạch bị trùng trong cùng manifest.
     def _validate_manifest(request: IncomingManifestRequest) -> None:
         if any(not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", item.id) for item in request.items):
             raise TransferError("The transfer manifest contains an invalid file ID.")
@@ -812,6 +835,7 @@ class TransferManager:
         if len(set(identifiers)) != len(identifiers) or len(set(paths)) != len(paths):
             raise TransferError("The transfer manifest contains duplicate files.")
 
+    # Chọn đích an toàn và đặt trước tên cho các tệp chưa hoàn tất.
     def create_incoming(
         self, request: IncomingManifestRequest, *, transfer_id: str | None = None,
     ) -> IncomingManifestResponse:
@@ -862,6 +886,7 @@ class TransferManager:
         )
 
     @staticmethod
+    # Tái sử dụng file khớp kích thước/hash hoặc thêm hậu tố để tránh ghi đè.
     def _received_target(
         root: Path, relative_path: str, size: int, digest: str, reserved: set[str]
     ) -> tuple[Path, bool]:
@@ -897,6 +922,7 @@ class TransferManager:
             stream=stream,
         )
 
+    # Ghi .part theo offset, khôi phục khi chunk lỗi và kiểm tra toàn vẹn khi kết thúc.
     async def receive_chunk(
         self,
         transfer_id: str,
@@ -925,6 +951,7 @@ class TransferManager:
         if offset > item.received_bytes:
             raise TransferError("The incoming chunk offset is ahead of Relay.")
         part_path = item.target.with_name(f".{item.target.name}.{item.id}.part")
+        # Chunk gửi lại phải khớp dữ liệu đã lưu để tránh ghi trùng.
         if offset < item.received_bytes:
             data = bytearray()
             async for chunk in stream:
@@ -973,6 +1000,7 @@ class TransferManager:
             with self._lock:
                 self._save_state()
             return {"received_bytes": new_size, "complete": False}
+        # Chỉ hoàn tất khi cả kích thước lẫn SHA-256 khớp manifest.
         if new_size != item.size or item.digest.hexdigest() != item.sha256:
             raise TransferError(f"{item.relative_path} failed its integrity check.")
         with self._lock:
@@ -1033,6 +1061,7 @@ class TransferManager:
         with self._lock:
             return sorted(self._incoming.values(), key=lambda item: item.created_at, reverse=True)
 
+    # Đánh dấu hủy và dọn phần tệp chưa hoàn tất khi có thể.
     def cancel_incoming(self, transfer_id: str) -> IncomingTransfer:
         with self._lock:
             transfer = self._incoming.get(transfer_id)
@@ -1057,6 +1086,7 @@ class TransferManager:
                 path.unlink(missing_ok=True)
         return transfer
 
+    # Làm mượt tốc độ để giao diện không dao động quá mạnh giữa các mẫu.
     def _record_outgoing_progress(self, transfer: OutgoingTransfer, delta: int) -> None:
         now = time.monotonic()
         elapsed = max(now - transfer.sample_at, 0.05)
@@ -1096,6 +1126,7 @@ class TransferManager:
         for item_id in set(item_ids) & set(completed):
             self.remove_staged(item_id)
 
+    # Ghi JSON qua file tạm rồi thay thế để lưu checkpoint và lịch sử.
     def _save_state(self) -> None:
         payload = {
             "version": 1,
@@ -1128,6 +1159,7 @@ class TransferManager:
         temporary.write_text(json.dumps(payload), encoding="utf-8")
         os.replace(temporary, self._state_path)
 
+    # Đọc trạng thái cũ, kiểm tra file và dựng lại hash của phần dữ liệu đã checkpoint.
     def _load_state(self) -> None:
         if not self._state_path.exists():
             return

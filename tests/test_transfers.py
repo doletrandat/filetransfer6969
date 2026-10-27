@@ -1,3 +1,4 @@
+# Kiểm thử staging, chunk, toàn vẹn, hủy và khôi phục trạng thái truyền.
 from __future__ import annotations
 
 import asyncio

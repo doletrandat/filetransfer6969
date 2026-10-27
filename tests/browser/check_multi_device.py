@@ -1,3 +1,4 @@
+# Kiểm tra giao diện khi có nhiều thiết bị tham gia.
 """Live browser regression for multi-device sending and first-visit notifications."""
 from __future__ import annotations
 

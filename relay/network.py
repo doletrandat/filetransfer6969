@@ -1,3 +1,4 @@
+# Kiểm tra địa chỉ LAN và thiết lập HTTPS sau khi đối chiếu fingerprint.
 from __future__ import annotations
 
 import hashlib
@@ -32,6 +33,7 @@ def connection_error_message(error: httpx.HTTPError) -> str:
     return "Không thể kết nối tới máy nhận. Hãy kiểm tra mạng và mở Relay trên máy nhận."
 
 
+# Chỉ chấp nhận HTTPS tới địa chỉ cục bộ/private hoặc hostname .local.
 def normalize_endpoint(endpoint: str) -> str:
     parsed = urlparse(endpoint)
     if parsed.scheme != "https" or not parsed.hostname or parsed.username or parsed.password:
@@ -49,10 +51,12 @@ def normalize_endpoint(endpoint: str) -> str:
     return f"https://{host}:{parsed.port}"
 
 
+# Đối chiếu fingerprint từ discovery trước khi tạo client TLS có kiểm tra hostname.
 def fetch_pinned_identity(
     endpoint: str, expected_fingerprint: str
 ) -> tuple[dict[str, Any], httpx.Client]:
     normalized = normalize_endpoint(endpoint)
+    # Kết nối thăm dò để lấy chứng chỉ; fingerprint được kiểm tra trước client sử dụng chính thức.
     with httpx.Client(verify=False, timeout=httpx.Timeout(10.0), follow_redirects=False) as probe:
         try:
             response = probe.get(f"{normalized}/api/v1/remote/identity")

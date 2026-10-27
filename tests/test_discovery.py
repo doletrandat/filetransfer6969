@@ -1,3 +1,4 @@
+# Kiểm thử khả năng duy trì danh sách thiết bị và làm mới mDNS.
 from __future__ import annotations
 
 import time

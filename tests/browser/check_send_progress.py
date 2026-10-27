@@ -1,3 +1,4 @@
+# Kiểm tra trạng thái và tiến trình gửi trên trình duyệt.
 """Optional live UI check: python tests/browser/check_send_progress.py.
 
 Requires Playwright and Edge. Uses temporary data and two loopback HTTPS services;

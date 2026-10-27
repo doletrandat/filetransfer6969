@@ -1,3 +1,4 @@
+// Hỗ trợ kết nối điện thoại bằng lời mời một lần.
 const connectForm = document.querySelector('form[action="/phone/connect"]');
 const modelInput = document.querySelector("#phoneDeviceModel");
 

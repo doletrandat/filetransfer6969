@@ -1,3 +1,5 @@
+// Điều khiển giao diện máy tính, trạng thái thiết bị và các thao tác truyền tệp.
+// Trạng thái giao diện được cập nhật từ snapshot của backend và các thao tác người dùng.
 const state = {
   status: null,
   devices: [],
@@ -702,6 +704,7 @@ async function disconnectPhone() {
   }
 }
 
+// Đưa file vào staging cục bộ theo chunk 8 MiB trước khi gửi tới máy khác.
 async function uploadFiles(files) {
   if (!files.length) return;
   const chunkSize = 8 * 1024 * 1024;
@@ -755,6 +758,7 @@ async function uploadFiles(files) {
   }
 }
 
+// Tạo một lượt độc lập cho mỗi máy nhận và giữ file staging để gửi lại.
 async function send() {
   const peers = selectedPeers().filter((peer) => !peerAlreadySending(peer));
   if (!peers.length || !state.staged.length || elements.sendButton.disabled || state.sending) return;

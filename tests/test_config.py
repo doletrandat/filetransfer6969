@@ -1,3 +1,4 @@
+# Kiểm thử định danh và cấp lại chứng chỉ khi địa chỉ hoặc thời hạn thay đổi.
 from __future__ import annotations
 
 import ipaddress

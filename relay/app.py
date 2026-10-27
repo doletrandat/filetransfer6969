@@ -1,3 +1,4 @@
+# API FastAPI và ranh giới truy cập cho giao diện máy tính, máy khác và điện thoại.
 from __future__ import annotations
 
 import base64
@@ -80,6 +81,7 @@ def open_with_default_app(path: Path) -> None:
     os.startfile(str(path))
 
 
+# Context tập hợp cấu hình và các bộ quản lý có cùng vòng đời với ứng dụng.
 class AppContext:
     def __init__(self, data_dir: Path, port: int) -> None:
         self.data_dir = data_dir
@@ -135,6 +137,7 @@ def create_app(context: AppContext) -> FastAPI:
         for name in ("app.js", "styles.css", "phone.js", "phone.css")
     ))
 
+    # API từ xa cần token được cấp riêng cho đúng lượt gửi.
     def require_offer(
         transfer_id: str, authorization: Annotated[str | None, Header()] = None,
     ) -> ReceiveOffer:
@@ -145,6 +148,7 @@ def create_app(context: AppContext) -> FastAPI:
         except TransferError as error:
             raise HTTPException(status_code=403, detail=str(error)) from error
 
+    # Chỉ cho phép dữ liệu tệp đi vào sau khi người nhận đã đồng ý.
     def require_accepted(offer: ReceiveOffer = Depends(require_offer)) -> ReceiveOffer:
         if offer.status != "accepted":
             raise HTTPException(status_code=403, detail="Máy nhận chưa chấp nhận lượt gửi này.")
@@ -156,6 +160,7 @@ def create_app(context: AppContext) -> FastAPI:
             raise HTTPException(status_code=401, detail="Open a new phone link on the computer.")
         return session
 
+    # Phân tách API localhost, API điện thoại và API từ xa; thêm các header bảo vệ.
     @app.middleware("http")
     async def security_headers(request: Request, call_next: RequestResponseEndpoint) -> Response:
         path = request.url.path
@@ -200,6 +205,7 @@ def create_app(context: AppContext) -> FastAPI:
             context={"control_token": context.control_token, "static_version": static_version},
         )
 
+    # Tạo URL mời một lần và mã QR để điện thoại kết nối qua HTTPS.
     @app.post("/api/v1/phone/invite")
     def create_phone_invitation() -> dict[str, Any]:
         if context.advertised_address == "127.0.0.1":
@@ -243,6 +249,7 @@ def create_app(context: AppContext) -> FastAPI:
                      "static_version": static_version},
         )
 
+    # Đổi lời mời hợp lệ lấy cookie phiên giới hạn thời gian.
     @app.post("/phone/connect")
     def connect_phone(
         request: Request,
@@ -295,6 +302,7 @@ def create_app(context: AppContext) -> FastAPI:
         except TransferError as error:
             raise HTTPException(status_code=409, detail=str(error)) from error
 
+    # Kiểm tra phiên và token điện thoại trước khi đọc nội dung upload theo stream.
     @app.post("/phone/api/files")
     async def phone_upload(
         request: Request,
@@ -368,6 +376,7 @@ def create_app(context: AppContext) -> FastAPI:
     def devices() -> list[dict[str, Any]]:
         return [device.public_dict() for device in context.discovery.list_devices()]
 
+    # Gộp trạng thái để giao diện cập nhật thiết bị, yêu cầu và tiến trình.
     @app.get("/api/v1/state")
     def state_snapshot() -> dict[str, Any]:
         return {
@@ -399,6 +408,7 @@ def create_app(context: AppContext) -> FastAPI:
             raise HTTPException(status_code=404, detail="This file is no longer available.")
         return path
 
+    # Chỉ mở tệp đã hoàn tất và vẫn nằm trong thư mục nhận của lượt.
     def computer_upload_path(transfer_id: str, item_id: str) -> Path:
         try:
             transfer = context.transfers.incoming_status(transfer_id)
@@ -517,6 +527,7 @@ def create_app(context: AppContext) -> FastAPI:
             raise HTTPException(status_code=400, detail=str(error)) from error
         return item.public_dict()
 
+    # Nhận từng phần tệp từ trình duyệt vào vùng staging trên máy cục bộ.
     @app.post("/api/v1/stage/chunk", response_model=None)
     async def stage_chunk(
         request: Request,
@@ -548,6 +559,7 @@ def create_app(context: AppContext) -> FastAPI:
     def clear_staged() -> dict[str, int]:
         return {"removed": context.transfers.clear_staged()}
 
+    # Tạo lượt gửi và chạy tác vụ truyền sau khi phản hồi API được trả về.
     @app.post("/api/v1/transfers")
     def start_transfer(
         payload: dict[str, Any],
@@ -611,6 +623,7 @@ def create_app(context: AppContext) -> FastAPI:
             "fingerprint": context.identity.fingerprint,
         }
 
+    # Máy nhận tạo offer từ manifest; dữ liệu tệp chưa được gửi ở bước này.
     @app.post("/api/v1/remote/transfers")
     def remote_start_transfer(payload: IncomingManifestRequest) -> dict[str, Any]:
         try:
@@ -619,6 +632,7 @@ def create_app(context: AppContext) -> FastAPI:
         except TransferError as error:
             raise HTTPException(status_code=400, detail=str(error)) from error
 
+    # Người dùng trên máy nhận quyết định có cho phép lượt gửi hay không.
     @app.post("/api/v1/requests/{transfer_id}/accept")
     def accept_request(transfer_id: str) -> dict[str, Any]:
         try:
@@ -648,6 +662,7 @@ def create_app(context: AppContext) -> FastAPI:
             raise HTTPException(status_code=400, detail=str(error)) from error
         return {"received": "true"}
 
+    # Nhận chunk từ máy gửi sau khi dependency đã kiểm tra offer và token.
     @app.post(
         "/api/v1/remote/transfers/{transfer_id}/files/{item_id}/chunks",
         response_model=None,

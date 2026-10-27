@@ -1,3 +1,4 @@
+# Kiểm thử API, giới hạn truy cập cục bộ và thao tác với tệp đã nhận.
 from __future__ import annotations
 
 import asyncio

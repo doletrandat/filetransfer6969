@@ -1,3 +1,4 @@
+# Điểm khởi động: chọn cổng, tạo ứng dụng HTTPS và bật khám phá thiết bị.
 from __future__ import annotations
 
 import argparse
@@ -21,6 +22,7 @@ def default_data_dir() -> Path:
     return Path.home() / ".local" / "share" / "relay"
 
 
+# Thử cổng mong muốn và các cổng kế tiếp để tránh xung đột khi khởi động.
 def available_port(preferred: int) -> int:
     for port in range(preferred, preferred + 20):
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
@@ -41,6 +43,7 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
+# Tạo context, khởi động discovery và chạy Uvicorn với chứng chỉ của thiết bị.
 def main() -> None:
     args = parse_args()
     if os.name == "nt":

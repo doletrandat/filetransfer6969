@@ -1,3 +1,4 @@
+# Lời mời, phiên trình duyệt điện thoại và xử lý tệp tải lên máy tính.
 from __future__ import annotations
 
 import hashlib
@@ -30,6 +31,7 @@ PHONE_COOKIE_NAME = "relay_phone_session"
 PHONE_ACTIVE_SECONDS = 15
 
 
+# Suy đoán tên model từ thông tin trình duyệt có thể cung cấp.
 def detect_phone_name(user_agent: str, model: str = "", model_header: str = "") -> str:
     if not model and model_header:
         with suppress(ValueError):
@@ -94,6 +96,7 @@ class PhoneUpload:
         }
 
 
+# Quản lý lời mời một lần, phiên điện thoại và lịch sử upload.
 class PhoneAccess:
     def __init__(self, data_dir: Path) -> None:
         self._lock = threading.RLock()
@@ -126,6 +129,7 @@ class PhoneAccess:
                 return {"status": "waiting", "connected_at": None}
             return {"status": "disconnected", "connected_at": None}
 
+    # Tạo token ngẫu nhiên; chỉ digest được giữ để kiểm tra lời mời.
     def create_invitation(self) -> tuple[str, float]:
         token = secrets.token_urlsafe(32)
         expiry = time.time() + INVITE_TTL_SECONDS
@@ -135,6 +139,7 @@ class PhoneAccess:
             self._sessions.clear()
         return token, expiry
 
+    # Dùng lời mời một lần để cấp cookie phiên và token cho thao tác thay đổi dữ liệu.
     def redeem(
         self, token: str, device_name: str = "From phone"
     ) -> tuple[str, PhoneSession] | None:
@@ -182,6 +187,7 @@ class PhoneAccess:
             session.last_seen_at = time.time()
             return session
 
+    # Thu hồi lời mời, phiên và hủy những upload điện thoại đang hoạt động.
     def revoke(self) -> None:
         with self._lock:
             self._invite_digest = None
@@ -269,6 +275,7 @@ class PhoneAccess:
             if self._history:
                 self._save_history()
 
+    # Đọc file theo stream, ghi .part, tính hash và chỉ chuyển tên khi nhận đủ.
     async def receive_file(
         self,
         session: PhoneSession,
@@ -376,6 +383,7 @@ class PhoneAccess:
         except OSError as error:
             print(f"Could not save phone upload history: {error}")
 
+    # Đặt trước tên đích để các upload đồng thời không chọn cùng đường dẫn.
     def _reserve_target(
         self, destination_root: Path, filename: str, device_name: str = "From phone"
     ) -> tuple[Path, Path]:

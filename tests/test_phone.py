@@ -1,3 +1,4 @@
+# Kiểm thử lời mời, phiên, truyền và hủy tệp từ điện thoại.
 from __future__ import annotations
 
 import asyncio

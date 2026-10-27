@@ -1,3 +1,4 @@
+# Kiểm thử chấp thuận từng lượt, token và giới hạn yêu cầu chờ.
 from __future__ import annotations
 
 import hashlib

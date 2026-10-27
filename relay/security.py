@@ -1,3 +1,4 @@
+# Các cấu trúc mã ghép nối và phiên cũ; luồng máy tính hiện dùng offer từng lượt.
 from __future__ import annotations
 
 import hashlib
@@ -28,6 +29,7 @@ class AuthorizedPeer:
     fingerprint: str
 
 
+# Registry của cơ chế mã ghép nối; không phải luồng xác nhận máy tính hiện tại.
 class PairingRegistry:
     def __init__(self) -> None:
         self._ticket: PairingTicket | None = None
@@ -80,6 +82,7 @@ def issue_session_token(peer: AuthorizedPeer) -> str:
     return f"{peer.id}.{secrets.token_urlsafe(32)}"
 
 
+# Lưu digest token và thời hạn của các phiên được cấp qua registry này.
 class SessionRegistry:
     def __init__(self) -> None:
         self._sessions: dict[str, tuple[AuthorizedPeer, float]] = {}

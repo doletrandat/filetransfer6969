@@ -1,3 +1,4 @@
+# Kiểm thử làm sạch đường dẫn và ngăn ghi ra ngoài thư mục nhận.
 from __future__ import annotations
 
 from pathlib import Path

@@ -1,3 +1,4 @@
+# Thiết lập và fixture dùng chung cho bộ kiểm thử Relay.
 from __future__ import annotations
 
 from pathlib import Path

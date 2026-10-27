@@ -1,3 +1,4 @@
+# Kiểm tra luồng yêu cầu và xác nhận nhận tệp trên trình duyệt.
 """Verify three-file consent, rejection, cancellation and progress with two real HTTPS apps."""
 from __future__ import annotations
 
