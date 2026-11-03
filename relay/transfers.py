@@ -88,6 +88,17 @@ def safe_join(root: Path, relative_path: str) -> Path:
     return candidate
 
 
+def has_linked_path(path: Path) -> bool:
+    """Detect symlinks and Windows junctions along a path before deleting a file."""
+    for candidate in (path, *path.parents):
+        try:
+            os.readlink(candidate)
+        except OSError:
+            continue
+        return True
+    return False
+
+
 def device_folder_name(name: str) -> str:
     cleaned = INVALID_WINDOWS_CHARACTERS.sub("_", name).strip(" .")[:80].rstrip(" .")
     if not cleaned:
@@ -202,6 +213,7 @@ class IncomingItem:
     sha256: str
     target: Path
     completed: bool = False
+    deleted: bool = False
     received_bytes: int = 0
     digest: Digest = field(default_factory=hashlib.sha256, repr=False)
 
@@ -253,8 +265,10 @@ class IncomingTransfer:
                     "relative_path": item.relative_path,
                     "size": item.size,
                     "completed": item.completed,
+                    "deleted": item.deleted,
                     "available": (
-                        item.completed and item.target.is_file() and not item.target.is_symlink()
+                        item.completed and not item.deleted
+                        and item.target.is_file() and not item.target.is_symlink()
                     ),
                 }
                 for item in self.items
@@ -1049,6 +1063,27 @@ class TransferManager:
             raise TransferError("That incoming transfer is no longer available.")
         return transfer
 
+    def delete_received_file(self, transfer_id: str, item_id: str) -> None:
+        with self._lock:
+            transfer = self.incoming_status(transfer_id)
+            item = next((item for item in transfer.items if item.id == item_id), None)
+            if item is None or not item.completed:
+                raise TransferError("Tệp chưa nhận xong hoặc không còn khả dụng.")
+            if transfer.status in {"receiving", "waiting"}:
+                raise TransferError("Hãy chờ lượt nhận kết thúc trước khi xoá tệp.")
+            if item.deleted:
+                return
+            path = item.target
+            if (
+                has_linked_path(path)
+                or not path.resolve().is_relative_to(transfer.destination.resolve())
+            ):
+                raise TransferError("Đường dẫn tệp nhận không hợp lệ.")
+            path.unlink(missing_ok=True)
+            item.deleted = True
+            transfer.updated_at = time.time()
+            self._save_state()
+
     def require_incoming_peer(self, transfer_id: str, peer_id: str, fingerprint: str) -> None:
         transfer = self.incoming_status(transfer_id)
         if (
@@ -1148,6 +1183,7 @@ class TransferManager:
                             "size": item.size,
                             "sha256": item.sha256,
                             "received_bytes": item.received_bytes,
+                            "deleted": item.deleted,
                         }
                         for item in transfer.items
                     ],
@@ -1222,7 +1258,8 @@ class TransferManager:
                     target = safe_join(destination, relative_path)
                     size = int(saved["size"])
                     sha256 = str(saved["sha256"])
-                    completed = (
+                    deleted = bool(saved.get("deleted", False))
+                    completed = deleted or (
                         target.is_file() and target.stat().st_size == size
                         and _sha256(target) == sha256
                     )
@@ -1241,7 +1278,7 @@ class TransferManager:
                                 digest.update(chunk)
                     items.append(IncomingItem(
                         id=item_id, relative_path=relative_path, size=size,
-                        sha256=sha256, target=target, completed=completed,
+                        sha256=sha256, target=target, completed=completed, deleted=deleted,
                         received_bytes=size if completed else received, digest=digest,
                     ))
                 incoming_transfer = IncomingTransfer(

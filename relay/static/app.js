@@ -19,6 +19,7 @@ const state = {
   connectionError: false,
   retrying: new Set(),
   cancelling: new Set(),
+  deleting: new Set(),
   uploadProgress: null,
   phoneInvite: null,
   historyFilter: "all",
@@ -448,6 +449,11 @@ function entryStatus(entry) {
   return `<span class="transfer-state ${escapeHtml(entry.status)}${recentlyCompleted ? " new-complete" : ""}">${entry.status === "complete" ? '<span class="check" aria-hidden="true">✓</span>' : ""}${label}</span>`;
 }
 
+function deleteReceivedButton(path, name) {
+  const deleting = state.deleting.has(path);
+  return `<button class="delete-file-button" type="button" data-delete-received="${escapeHtml(path)}" data-delete-name="${escapeHtml(name)}" aria-label="Xoá tệp ${escapeHtml(name)}" ${deleting ? "disabled" : ""}>${deleting ? "Đang xoá…" : "Xoá tệp"}</button>`;
+}
+
 function entryActions(entry, includeCopy = false) {
   if (entry.phoneTransfer && entry.status === "receiving") {
     const cancelling = state.cancelling.has(`phone:${entry.phoneTransfer.id}`);
@@ -456,8 +462,8 @@ function entryActions(entry, includeCopy = false) {
   if (entry.phoneItem) {
     const item = entry.phoneItem;
     return item.available
-      ? `<button class="row-action" type="button" data-open-phone-upload="${escapeHtml(item.id)}">Mở tệp</button>${includeCopy ? `<button class="row-action" type="button" data-copy-phone-upload="${escapeHtml(item.id)}">Sao chép đường dẫn</button>` : ""}`
-      : '<span class="row-meta">Tệp không còn trên máy</span>';
+      ? `<button class="row-action" type="button" data-open-phone-upload="${escapeHtml(item.id)}">Mở tệp</button>${includeCopy ? `<button class="row-action" type="button" data-copy-phone-upload="${escapeHtml(item.id)}">Sao chép đường dẫn</button>` : ""}${deleteReceivedButton(`/api/v1/received/phone/${encodeURIComponent(item.id)}`, item.name)}`
+      : `<span class="row-meta">${item.deleted ? "Đã xoá tệp" : "Tệp không còn trên máy"}</span>`;
   }
   if (entry.kind === "sent") {
     if (isSending(entry)) {
@@ -474,8 +480,8 @@ function entryActions(entry, includeCopy = false) {
   }
   const completed = entry.items.filter((item) => item.completed);
   return completed.map((item) => item.available
-    ? `<button class="received-file-link" type="button" data-open-computer-transfer="${escapeHtml(entry.transferId)}" data-open-computer-item="${escapeHtml(item.id)}" title="Mở ${escapeHtml(item.relative_path)} bằng ứng dụng trên máy">${completed.length === 1 ? "Mở tệp" : escapeHtml(item.name)}</button>`
-    : `<span class="row-meta">${escapeHtml(item.name)} · Tệp không còn trên máy</span>`).join("");
+    ? `<span class="received-file-actions"><button class="received-file-link" type="button" data-open-computer-transfer="${escapeHtml(entry.transferId)}" data-open-computer-item="${escapeHtml(item.id)}" title="Mở ${escapeHtml(item.relative_path)} bằng ứng dụng trên máy">${completed.length === 1 ? "Mở tệp" : escapeHtml(item.name)}</button>${deleteReceivedButton(`/api/v1/received/computer/${encodeURIComponent(entry.transferId)}/${encodeURIComponent(item.id)}`, item.relative_path)}</span>`
+    : `<span class="row-meta">${escapeHtml(item.name)} · ${item.deleted ? "Đã xoá tệp" : "Tệp không còn trên máy"}</span>`).join("");
 }
 
 function entryProgress(entry) {
@@ -969,6 +975,26 @@ async function openReceivedFile(button) {
 document.addEventListener("click", (event) => {
   const button = event.target.closest("[data-open-phone-upload], [data-open-computer-transfer]");
   if (button) openReceivedFile(button);
+});
+
+document.addEventListener("click", async (event) => {
+  const button = event.target.closest("[data-delete-received]");
+  if (!button) return;
+  const path = button.dataset.deleteReceived;
+  if (state.deleting.has(path)) return;
+  if (!window.confirm(`Xoá tệp “${button.dataset.deleteName}” khỏi máy?\nThao tác này không thể hoàn tác. Lịch sử nhận vẫn được giữ lại.`)) return;
+  state.deleting.add(path);
+  renderAll();
+  try {
+    await api(path, { method: "DELETE" });
+    await refresh();
+    showToast("Đã xoá tệp khỏi máy.");
+  } catch (error) {
+    showToast(error.message, true);
+  } finally {
+    state.deleting.delete(path);
+    renderAll();
+  }
 });
 document.addEventListener("click", async (event) => {
   const button = event.target.closest("[data-copy-phone-upload]");

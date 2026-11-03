@@ -21,6 +21,7 @@ from relay.transfers import (
     TransferCancelled,
     TransferError,
     device_folder_name,
+    has_linked_path,
     safe_join,
     sanitize_relative_path,
 )
@@ -210,10 +211,26 @@ class PhoneAccess:
         for item in uploads:
             path = Path(str(item.get("path", "")))
             try:
-                item["available"] = path.is_file() and not path.is_symlink()
+                item["available"] = (
+                    not item.get("deleted", False) and path.is_file() and not path.is_symlink()
+                )
             except OSError:
                 item["available"] = False
         return uploads
+
+    def delete_received_file(self, upload_id: str) -> None:
+        with self._lock:
+            item = next((item for item in self._history if item["id"] == upload_id), None)
+            if item is None:
+                raise TransferError("Tệp nhận không còn khả dụng.")
+            if item.get("deleted", False):
+                return
+            path = Path(str(item["path"]))
+            if has_linked_path(path):
+                raise TransferError("Đường dẫn tệp nhận không hợp lệ.")
+            path.unlink(missing_ok=True)
+            item["deleted"] = True
+            self._save_history()
 
     def transfer_activity(self) -> list[dict[str, Any]]:
         with self._lock:

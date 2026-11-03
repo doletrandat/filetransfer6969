@@ -908,6 +908,7 @@ main {
 
 .row-actions {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: flex-end;
   gap: 8px;
@@ -917,7 +918,8 @@ main {
 .row-action,
 .received-file-link,
 .retry-button,
-.cancel-button {
+.cancel-button,
+.delete-file-button {
   padding: 4px 8px;
   border-radius: var(--radius-xs);
   border: 1px solid var(--border-default);
@@ -934,23 +936,45 @@ main {
 .row-action:hover,
 .received-file-link:hover,
 .retry-button:hover,
-.cancel-button:hover {
+.cancel-button:hover,
+.delete-file-button:hover {
   background-color: var(--accent-subtle);
   border-color: var(--accent-border);
   color: var(--accent-hover);
 }
 
 .retry-button,
-.cancel-button {
+.cancel-button,
+.delete-file-button {
   color: var(--error);
   border-color: var(--error-border);
   background-color: var(--error-subtle);
 }
 
 .retry-button:hover,
-.cancel-button:hover {
+.cancel-button:hover,
+.delete-file-button:hover {
   background-color: var(--error);
   color: #ffffff;
+}
+
+.received-file-actions {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+}
+
+.received-file-actions .received-file-link {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.delete-file-button:disabled {
+  opacity: 0.5;
+  cursor: wait;
 }
 
 .row-extra {

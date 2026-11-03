@@ -28,7 +28,7 @@ Tệp nhận mới được lưu vào `<Thư mục nhận>/<Tên máy gửi>/`, 
 
 ### Lịch sử
 
-Lọc các lượt đã gửi/đã nhận, xem trạng thái, mở tệp hoàn tất và đổi thư mục lưu tệp nhận.
+Lọc các lượt đã gửi/đã nhận, xem trạng thái, mở hoặc xoá tệp hoàn tất và đổi thư mục lưu tệp nhận. Trong màn **Nhận** hoặc **Lịch sử**, chọn **Xoá tệp** rồi xác nhận để xoá tệp khỏi ổ đĩa. Lịch sử vẫn được giữ với nhãn **Đã xoá tệp**; thao tác xoá không thể hoàn tác.
 
 ![Màn hình Lịch sử của Relay trên máy tính, hiển thị các tệp đã nhận và trạng thái hoàn tất](docs/screenshots/desktop_04_history.png)
 

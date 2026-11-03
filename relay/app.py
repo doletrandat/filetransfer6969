@@ -401,7 +401,7 @@ def create_app(context: AppContext) -> FastAPI:
             (item for item in context.phone.recent_uploads() if item["id"] == upload_id),
             None,
         )
-        if upload is None:
+        if upload is None or upload.get("deleted", False):
             raise HTTPException(status_code=404, detail="This file is no longer available.")
         path = Path(str(upload["path"]))
         if path.is_symlink() or not path.is_file():
@@ -417,7 +417,7 @@ def create_app(context: AppContext) -> FastAPI:
                 status_code=404, detail="This file is no longer available."
             ) from error
         item = next((candidate for candidate in transfer.items if candidate.id == item_id), None)
-        if item is None or not item.completed:
+        if item is None or not item.completed or item.deleted:
             raise HTTPException(status_code=404, detail="This file is no longer available.")
         path = item.target
         if (
@@ -448,6 +448,30 @@ def create_app(context: AppContext) -> FastAPI:
     @app.post("/api/v1/received/computer/{transfer_id}/{item_id}/open")
     def open_computer_upload_in_windows(transfer_id: str, item_id: str) -> dict[str, bool]:
         return open_received_file(computer_upload_path(transfer_id, item_id))
+
+    @app.delete("/api/v1/received/phone/{upload_id}")
+    def delete_phone_upload(upload_id: str) -> dict[str, bool]:
+        try:
+            context.phone.delete_received_file(upload_id)
+        except TransferError as error:
+            raise HTTPException(status_code=404, detail=str(error)) from error
+        except OSError as error:
+            raise HTTPException(
+                status_code=409, detail="Không xoá được tệp. Hãy đóng tệp đang mở và thử lại."
+            ) from error
+        return {"deleted": True}
+
+    @app.delete("/api/v1/received/computer/{transfer_id}/{item_id}")
+    def delete_computer_upload(transfer_id: str, item_id: str) -> dict[str, bool]:
+        try:
+            context.transfers.delete_received_file(transfer_id, item_id)
+        except TransferError as error:
+            raise HTTPException(status_code=404, detail=str(error)) from error
+        except OSError as error:
+            raise HTTPException(
+                status_code=409, detail="Không xoá được tệp. Hãy đóng tệp đang mở và thử lại."
+            ) from error
+        return {"deleted": True}
 
     def preview_response(request: Request, path: Path, file_url: str) -> HTMLResponse:
         suffix = path.suffix.lower()
